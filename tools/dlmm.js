@@ -75,6 +75,63 @@ async function getPool(poolAddress) {
 
 setInterval(() => poolCache.clear(), 5 * 60 * 1000);
 
+// ─── SOL price cache (for SDK fee fallback USD estimation) ──────
+let _solPrice = 0;
+let _solPriceAt = 0;
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+
+async function getSolPrice() {
+  if (_solPrice && Date.now() - _solPriceAt < 60_000) return _solPrice;
+  try {
+    const res = await fetch(`https://api.jup.ag/price/v3?ids=${SOL_MINT}`);
+    if (!res.ok) return _solPrice || 0;
+    const data = await res.json();
+    _solPrice = data.data?.[SOL_MINT]?.usdPrice ?? 0;
+    _solPriceAt = Date.now();
+    return _solPrice;
+  } catch {
+    return _solPrice || 0;
+  }
+}
+
+// ─── SDK fallback for single position ──────────────────────────
+// Called when DLMM PnL API returns no data for a position.
+// Returns bin range, in-range status, and fee estimate in USD.
+async function fetchPositionSdkFallback(poolAddress, positionAddress, walletPubkey) {
+  try {
+    const pool = await getPool(poolAddress);
+    const { userPositions, activeBin } = await pool.getPositionsByUserAndLbPair(walletPubkey);
+    const found = userPositions?.find((p) => p.publicKey.toBase58() === positionAddress);
+    if (!found) return null;
+
+    const pd = found.positionData;
+    const xDec = pool.tokenX.decimal ?? 9;
+    const yDec = pool.tokenY.decimal ?? 9;
+    const feeX = (pd.feeX?.toNumber() ?? 0) / Math.pow(10, xDec);
+    const feeY = (pd.feeY?.toNumber() ?? 0) / Math.pow(10, yDec);
+
+    // Convert feeX → Y using active bin price, then Y (SOL) → USD
+    const priceXperY = pool.fromPricePerLamport(Number(activeBin.price)); // X per 1 Y
+    const feeXinY = priceXperY > 0 ? feeX / priceXperY : 0;
+    const totalFeeInY = feeY + feeXinY;
+    const solPrice = await getSolPrice();
+
+    const activeId = activeBin.binId;
+    const inRange = activeId >= pd.lowerBinId && activeId <= pd.upperBinId;
+
+    return {
+      lowerBinId:      pd.lowerBinId,
+      upperBinId:      pd.upperBinId,
+      poolActiveBinId: activeId,
+      isOutOfRange:    !inRange,
+      unclaimedFeeUsd: Math.round(totalFeeInY * solPrice * 100) / 100,
+    };
+  } catch (e) {
+    log("sdk_fallback", `${positionAddress.slice(0, 8)}: ${e.message}`);
+    return null;
+  }
+}
+
 // ─── Get Active Bin ────────────────────────────────────────────
 export async function getActiveBin({ pool_address }) {
   const pool = await getPool(pool_address);
@@ -245,25 +302,50 @@ async function fetchDlmmPnlForPool(poolAddress, walletAddress) {
 
 // ─── Get Position PnL (Meteora API) ─────────────────────────────
 export async function getPositionPnl({ pool_address, position_address }) {
-  const walletAddress = getWallet().publicKey.toString();
+  const wallet = getWallet();
+  const walletAddress = wallet.publicKey.toString();
   try {
     const byAddress = await fetchDlmmPnlForPool(pool_address, walletAddress);
     const p = byAddress[position_address];
-    if (!p) return { error: "Position not found in PnL data" };
 
-    const unclaimedUsd = (parseFloat(p.unrealizedPnl?.unclaimedFeeTokenX || 0) + parseFloat(p.unrealizedPnl?.unclaimedFeeTokenY || 0));
-    const currentValueUsd = parseFloat(p.unrealizedPnl?.balances || 0);
+    if (p) {
+      const unclaimedUsd    = parseFloat(p.unrealizedPnl?.unclaimedFeeTokenX || 0) + parseFloat(p.unrealizedPnl?.unclaimedFeeTokenY || 0);
+      const currentValueUsd = parseFloat(p.unrealizedPnl?.balances || 0);
+      return {
+        pnl_usd:           Math.round((p.pnlUsd ?? 0) * 100) / 100,
+        pnl_pct:           Math.round((p.pnlPctChange ?? 0) * 100) / 100,
+        current_value_usd: Math.round(currentValueUsd * 100) / 100,
+        unclaimed_fee_usd: Math.round(unclaimedUsd * 100) / 100,
+        all_time_fees_usd: Math.round((parseFloat(p.allTimeFees?.amountUsd || p.allTimeFees || 0)) * 100) / 100,
+        in_range:    !p.isOutOfRange,
+        lower_bin:   p.lowerBinId       ?? null,
+        upper_bin:   p.upperBinId       ?? null,
+        active_bin:  p.poolActiveBinId  ?? null,
+        age_minutes: p.createdAt ? Math.floor((Date.now() - p.createdAt * 1000) / 60000) : null,
+        source: "api",
+      };
+    }
+
+    // API returned nothing — fall back to SDK
+    log("pnl", `API miss for ${position_address.slice(0, 8)} — trying SDK fallback`);
+    const fb = await fetchPositionSdkFallback(pool_address, position_address, wallet.publicKey);
+    if (!fb) return { error: "Position not found in PnL API or SDK" };
+
+    const tracked = getTrackedPosition(position_address);
     return {
-      pnl_usd: Math.round((p.pnlUsd ?? 0) * 100) / 100,
-      pnl_pct: Math.round((p.pnlPctChange ?? 0) * 100) / 100,
-      current_value_usd: Math.round(currentValueUsd * 100) / 100,
-      unclaimed_fee_usd: Math.round(unclaimedUsd * 100) / 100,
-      all_time_fees_usd: Math.round((parseFloat(p.allTimeFees?.amountUsd || p.allTimeFees || 0)) * 100) / 100,
-      in_range: !p.isOutOfRange,
-      lower_bin: p.lowerBinId ?? null,
-      upper_bin: p.upperBinId ?? null,
-      active_bin: p.poolActiveBinId ?? null,
-      age_minutes: p.createdAt ? Math.floor((Date.now() - p.createdAt * 1000) / 60000) : null,
+      pnl_usd:           0,
+      pnl_pct:           0,
+      current_value_usd: 0,
+      unclaimed_fee_usd: fb.unclaimedFeeUsd,
+      all_time_fees_usd: 0,
+      in_range:    !fb.isOutOfRange,
+      lower_bin:   fb.lowerBinId,
+      upper_bin:   fb.upperBinId,
+      active_bin:  fb.poolActiveBinId,
+      age_minutes: tracked?.deployed_at
+        ? Math.floor((Date.now() - new Date(tracked.deployed_at).getTime()) / 60000)
+        : null,
+      source: "sdk_fallback",
     };
   } catch (error) {
     log("pnl_error", error.message);
@@ -322,18 +404,33 @@ export async function getMyPositions({ force = false } = {}) {
     const pnlByPool = {};
     uniquePools.forEach((pool, i) => { pnlByPool[pool] = pnlMaps[i]; });
 
-    const positions = raw.map((r) => {
-      const p = pnlByPool[r.pool]?.[r.position] || null;
+    // SDK fallback for positions the API missed
+    const walletPubkey = new PublicKey(walletAddress);
+    const sdkFallbacks = {};
+    const missing = raw.filter((r) => !pnlByPool[r.pool]?.[r.position]);
+    if (missing.length > 0) {
+      log("positions", `PnL API missing ${missing.length} position(s) — using SDK fallback`);
+      await Promise.all(missing.map(async (r) => {
+        const fb = await fetchPositionSdkFallback(r.pool, r.position, walletPubkey);
+        if (fb) sdkFallbacks[r.position] = fb;
+      }));
+    }
 
-      const inRange = p ? !p.isOutOfRange : true;
+    const positions = raw.map((r) => {
+      const p  = pnlByPool[r.pool]?.[r.position] || null;
+      const fb = sdkFallbacks[r.position] || null;
+
+      const inRange = p ? !p.isOutOfRange : (fb ? !fb.isOutOfRange : true);
       if (inRange) markInRange(r.position);
       else markOutOfRange(r.position);
 
-      const lowerBin  = p?.lowerBinId       ?? r.lower_bin;
-      const upperBin  = p?.upperBinId       ?? r.upper_bin;
-      const activeBin = p?.poolActiveBinId  ?? null;
+      const lowerBin  = p?.lowerBinId      ?? fb?.lowerBinId      ?? r.lower_bin;
+      const upperBin  = p?.upperBinId      ?? fb?.upperBinId      ?? r.upper_bin;
+      const activeBin = p?.poolActiveBinId ?? fb?.poolActiveBinId ?? null;
 
-      const unclaimedFees = p ? (parseFloat(p.unrealizedPnl?.unclaimedFeeTokenX || 0) + parseFloat(p.unrealizedPnl?.unclaimedFeeTokenY || 0)) : 0;
+      const unclaimedFees = p
+        ? (parseFloat(p.unrealizedPnl?.unclaimedFeeTokenX || 0) + parseFloat(p.unrealizedPnl?.unclaimedFeeTokenY || 0))
+        : (fb?.unclaimedFeeUsd ?? 0);
       const totalValue    = p ? parseFloat(p.unrealizedPnl?.balances || 0) : 0;
       const collectedFees = p ? parseFloat(p.allTimeFees?.amountUsd || p.allTimeFees || 0) : 0;
       const pnlUsd        = p?.pnlUsd       ?? 0;
