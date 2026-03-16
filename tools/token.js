@@ -146,37 +146,39 @@ export async function getTokenHolders({ mint, limit = 20 }) {
   const totalBundlersPct = bundlers.reduce((s, b) => s + (Number(b.percentage) || 0), 0);
 
   // ─── Smart Wallet / KOL Cross-reference ──────────────────────
+  // Query ALL tracked smart wallets via PnL API — not just top 100 holders
+  // This catches KOLs even if they hold a small amount outside the top 100
   const { listSmartWallets } = await import("../smart-wallets.js");
   const { wallets: smartWallets } = listSmartWallets();
-  const smartWalletMap = new Map(smartWallets.map((w) => [w.address, w]));
-
-  // Find any smart wallets in the holder list
-  const matchedAddresses = mapped
-    .map((h) => smartWalletMap.get(h.address))
-    .filter(Boolean)
-    .map((w) => w.address);
-
-  // Fetch PnL for matched smart wallets (if any)
   let smartWalletsHolding = [];
-  if (matchedAddresses.length > 0) {
+
+  if (smartWallets.length > 0) {
+    const addresses = smartWallets.map((w) => w.address).join(",");
     const pnlRes = await fetch(
-      `${DATAPI_BASE}/pnl?addresses=${matchedAddresses.join(",")}&includeClosed=true`
+      `${DATAPI_BASE}/pnl?addresses=${addresses}&includeClosed=true`
     ).catch(() => null);
     const pnlData = pnlRes?.ok ? await pnlRes.json() : null;
 
-    smartWalletsHolding = matchedAddresses.map((addr) => {
-      const wallet = smartWalletMap.get(addr);
-      const holder = mapped.find((h) => h.address === addr);
-      const pnl = pnlData?.[addr] ?? pnlData?.find?.((p) => p.address === addr) ?? null;
-      return {
+    for (const wallet of smartWallets) {
+      const pnl = pnlData?.[wallet.address] ?? null;
+      // Check if this wallet holds the target token
+      const tokenPnl = Array.isArray(pnl)
+        ? pnl.find((p) => p.mint === mint || p.token === mint)
+        : pnl?.tokens?.find?.((p) => p.mint === mint || p.token === mint);
+      if (!tokenPnl) continue;
+
+      // Check if they appear in top 100 for rank/pct info
+      const holderEntry = mapped.find((h) => h.address === wallet.address);
+      smartWalletsHolding.push({
         name: wallet.name,
         category: wallet.category,
-        address: addr,
-        amount: holder?.amount,
-        pct: holder?.pct,
-        pnl: pnl ?? "unavailable",
-      };
-    });
+        address: wallet.address,
+        in_top_100: !!holderEntry,
+        amount: holderEntry?.amount ?? tokenPnl.balance ?? tokenPnl.amount,
+        pct: holderEntry?.pct ?? null,
+        pnl: tokenPnl,
+      });
+    }
   }
 
   return {
