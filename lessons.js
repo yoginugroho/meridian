@@ -15,8 +15,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
 
 const LESSONS_FILE = "./lessons.json";
-const MIN_EVOLVE_POSITIONS = 5;   // don't evolve until we have real data
-const MAX_CHANGE_PER_STEP  = 0.20; // never shift a threshold more than 20% at once
+const MIN_EVOLVE_POSITIONS = 5; // don't evolve until we have real data
+const MAX_CHANGE_PER_STEP = 0.2; // never shift a threshold more than 20% at once
 
 function load() {
   if (!fs.existsSync(LESSONS_FILE)) {
@@ -72,17 +72,21 @@ export async function recordPerformance(perf) {
     perf.final_value_usd <= perf.amount_sol * 2;
 
   if (suspiciousUnitMix) {
-    log("lessons_warn", `Skipped suspicious performance record for ${perf.pool_name || perf.pool}: initial=${perf.initial_value_usd}, final=${perf.final_value_usd}, amount_sol=${perf.amount_sol}`);
+    log(
+      "lessons_warn",
+      `Skipped suspicious performance record for ${perf.pool_name || perf.pool}: initial=${perf.initial_value_usd}, final=${perf.final_value_usd}, amount_sol=${perf.amount_sol}`,
+    );
     return;
   }
 
-  const pnl_usd = (perf.final_value_usd + perf.fees_earned_usd) - perf.initial_value_usd;
-  const pnl_pct = perf.initial_value_usd > 0
-    ? (pnl_usd / perf.initial_value_usd) * 100
-    : 0;
-  const range_efficiency = perf.minutes_held > 0
-    ? (perf.minutes_in_range / perf.minutes_held) * 100
-    : 0;
+  const pnl_usd =
+    perf.final_value_usd + perf.fees_earned_usd - perf.initial_value_usd;
+  const pnl_pct =
+    perf.initial_value_usd > 0 ? (pnl_usd / perf.initial_value_usd) * 100 : 0;
+  const range_efficiency =
+    perf.minutes_held > 0
+      ? (perf.minutes_in_range / perf.minutes_held) * 100
+      : 0;
 
   const entry = {
     ...perf,
@@ -127,7 +131,10 @@ export async function recordPerformance(perf) {
     const result = evolveThresholds(data.performance, config);
     if (result?.changes && Object.keys(result.changes).length > 0) {
       reloadScreeningThresholds();
-      log("evolve", `Auto-evolved thresholds: ${JSON.stringify(result.changes)}`);
+      log(
+        "evolve",
+        `Auto-evolved thresholds: ${JSON.stringify(result.changes)}`,
+      );
     }
 
     // Darwinian signal weight recalculation
@@ -135,13 +142,16 @@ export async function recordPerformance(perf) {
       const { recalculateWeights } = await import("./signal-weights.js");
       const wResult = recalculateWeights(data.performance, config);
       if (wResult.changes.length > 0) {
-        log("evolve", `Darwin: adjusted ${wResult.changes.length} signal weight(s)`);
+        log(
+          "evolve",
+          `Darwin: adjusted ${wResult.changes.length} signal weight(s)`,
+        );
       }
     }
   }
 
   // Fire-and-forget sync to hive mind (if enabled)
-  import("./hive-mind.js").then(m => m.syncToHive()).catch(() => {});
+  import("./hive-mind.js").then((m) => m.syncToHive()).catch(() => {});
 }
 
 /**
@@ -152,10 +162,14 @@ function derivLesson(perf) {
   const tags = [];
 
   // Categorize outcome
-  const outcome = perf.pnl_pct >= 5 ? "good"
-    : perf.pnl_pct >= 0 ? "neutral"
-    : perf.pnl_pct >= -5 ? "poor"
-    : "bad";
+  const outcome =
+    perf.pnl_pct >= 5
+      ? "good"
+      : perf.pnl_pct >= 0
+        ? "neutral"
+        : perf.pnl_pct >= -5
+          ? "poor"
+          : "bad";
 
   if (outcome === "neutral") return null; // nothing interesting to learn
 
@@ -167,7 +181,7 @@ function derivLesson(perf) {
     `volatility=${perf.volatility}`,
     `fee_tvl_ratio=${perf.fee_tvl_ratio}`,
     `organic=${perf.organic_score}`,
-    `bin_range=${typeof perf.bin_range === 'object' ? JSON.stringify(perf.bin_range) : perf.bin_range}`,
+    `bin_range=${typeof perf.bin_range === "object" ? JSON.stringify(perf.bin_range) : perf.bin_range}`,
   ].join(", ");
 
   let rule = "";
@@ -175,7 +189,11 @@ function derivLesson(perf) {
   if (outcome === "good" || outcome === "bad") {
     if (perf.range_efficiency < 30 && outcome === "bad") {
       rule = `AVOID: ${perf.pool_name}-type pools (volatility=${perf.volatility}, bin_step=${perf.bin_step}) with strategy="${perf.strategy}" — went OOR ${100 - perf.range_efficiency}% of the time. Consider wider bin_range or bid_ask strategy.`;
-      tags.push("oor", perf.strategy, `volatility_${Math.round(perf.volatility)}`);
+      tags.push(
+        "oor",
+        perf.strategy,
+        `volatility_${Math.round(perf.volatility)}`,
+      );
     } else if (perf.range_efficiency > 80 && outcome === "good") {
       rule = `PREFER: ${perf.pool_name}-type pools (volatility=${perf.volatility}, bin_step=${perf.bin_step}) with strategy="${perf.strategy}" — ${perf.range_efficiency}% in-range efficiency, PnL +${perf.pnl_pct}%.`;
       tags.push("efficient", perf.strategy);
@@ -220,13 +238,13 @@ export function evolveThresholds(perfData, config) {
   if (!perfData || perfData.length < MIN_EVOLVE_POSITIONS) return null;
 
   const winners = perfData.filter((p) => p.pnl_pct > 0);
-  const losers  = perfData.filter((p) => p.pnl_pct < -5);
+  const losers = perfData.filter((p) => p.pnl_pct < -5);
 
   // Need at least some signal in both directions before adjusting
   const hasSignal = winners.length >= 2 || losers.length >= 2;
   if (!hasSignal) return null;
 
-  const changes   = {};
+  const changes = {};
   const rationale = {};
 
   // ── 1. maxVolatility ─────────────────────────────────────────
@@ -234,16 +252,20 @@ export function evolveThresholds(perfData, config) {
   // If winners span higher volatility safely → we can loosen a bit.
   {
     const winnerVols = winners.map((p) => p.volatility).filter(isFiniteNum);
-    const loserVols  = losers.map((p) => p.volatility).filter(isFiniteNum);
-    const current    = config.screening.maxVolatility;
+    const loserVols = losers.map((p) => p.volatility).filter(isFiniteNum);
+    const current = config.screening.maxVolatility;
 
     if (loserVols.length >= 2) {
       // 25th percentile of loser volatilities — this is where things start going wrong
       const loserP25 = percentile(loserVols, 25);
       if (loserP25 < current) {
         // Tighten: new ceiling = loserP25 + a small buffer
-        const target  = loserP25 * 1.15;
-        const newVal  = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 1.0, 20.0);
+        const target = loserP25 * 1.15;
+        const newVal = clamp(
+          nudge(current, target, MAX_CHANGE_PER_STEP),
+          1.0,
+          20.0,
+        );
         const rounded = Number(newVal.toFixed(1));
         if (rounded < current) {
           changes.maxVolatility = rounded;
@@ -254,8 +276,12 @@ export function evolveThresholds(perfData, config) {
       // All winners so far — loosen conservatively so we don't miss good pools
       const winnerP75 = percentile(winnerVols, 75);
       if (winnerP75 > current * 1.1) {
-        const target  = winnerP75 * 1.1;
-        const newVal  = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 1.0, 20.0);
+        const target = winnerP75 * 1.1;
+        const newVal = clamp(
+          nudge(current, target, MAX_CHANGE_PER_STEP),
+          1.0,
+          20.0,
+        );
         const rounded = Number(newVal.toFixed(1));
         if (rounded > current) {
           changes.maxVolatility = rounded;
@@ -265,23 +291,27 @@ export function evolveThresholds(perfData, config) {
     }
   }
 
-  // ── 2. minFeeTvlRatio ─────────────────────────────────────────
+  // ── 2. minFeeActiveTvlRatio ─────────────────────────────────────────
   // Raise the floor if low-fee pools consistently underperform.
   {
     const winnerFees = winners.map((p) => p.fee_tvl_ratio).filter(isFiniteNum);
-    const loserFees  = losers.map((p) => p.fee_tvl_ratio).filter(isFiniteNum);
-    const current    = config.screening.minFeeTvlRatio;
+    const loserFees = losers.map((p) => p.fee_tvl_ratio).filter(isFiniteNum);
+    const current = config.screening.minFeeActiveTvlRatio;
 
     if (winnerFees.length >= 2) {
       // Minimum fee/TVL among winners — we know pools below this don't work for us
       const minWinnerFee = Math.min(...winnerFees);
       if (minWinnerFee > current * 1.2) {
-        const target  = minWinnerFee * 0.85; // stay slightly below min winner
-        const newVal  = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 0.05, 10.0);
+        const target = minWinnerFee * 0.85; // stay slightly below min winner
+        const newVal = clamp(
+          nudge(current, target, MAX_CHANGE_PER_STEP),
+          0.05,
+          10.0,
+        );
         const rounded = Number(newVal.toFixed(2));
         if (rounded > current) {
-          changes.minFeeTvlRatio = rounded;
-          rationale.minFeeTvlRatio = `Lowest winner fee_tvl=${minWinnerFee.toFixed(2)} — raised floor from ${current} → ${rounded}`;
+          changes.minFeeActiveTvlRatio = rounded;
+          rationale.minFeeActiveTvlRatio = `Lowest winner fee_tvl=${minWinnerFee.toFixed(2)} — raised floor from ${current} → ${rounded}`;
         }
       }
     }
@@ -293,12 +323,16 @@ export function evolveThresholds(perfData, config) {
       if (maxLoserFee < current * 1.5 && winnerFees.length > 0) {
         const minWinnerFee = Math.min(...winnerFees);
         if (minWinnerFee > maxLoserFee) {
-          const target  = maxLoserFee * 1.2;
-          const newVal  = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 0.05, 10.0);
+          const target = maxLoserFee * 1.2;
+          const newVal = clamp(
+            nudge(current, target, MAX_CHANGE_PER_STEP),
+            0.05,
+            10.0,
+          );
           const rounded = Number(newVal.toFixed(2));
-          if (rounded > current && !changes.minFeeTvlRatio) {
-            changes.minFeeTvlRatio = rounded;
-            rationale.minFeeTvlRatio = `Losers had fee_tvl<=${maxLoserFee.toFixed(2)}, winners higher — raised floor from ${current} → ${rounded}`;
+          if (rounded > current && !changes.minFeeActiveTvlRatio) {
+            changes.minFeeActiveTvlRatio = rounded;
+            rationale.minFeeActiveTvlRatio = `Losers had fee_tvl<=${maxLoserFee.toFixed(2)}, winners higher — raised floor from ${current} → ${rounded}`;
           }
         }
       }
@@ -308,19 +342,27 @@ export function evolveThresholds(perfData, config) {
   // ── 3. minOrganic ─────────────────────────────────────────────
   // Raise organic floor if low-organic tokens consistently failed.
   {
-    const loserOrganics  = losers.map((p) => p.organic_score).filter(isFiniteNum);
-    const winnerOrganics = winners.map((p) => p.organic_score).filter(isFiniteNum);
-    const current        = config.screening.minOrganic;
+    const loserOrganics = losers
+      .map((p) => p.organic_score)
+      .filter(isFiniteNum);
+    const winnerOrganics = winners
+      .map((p) => p.organic_score)
+      .filter(isFiniteNum);
+    const current = config.screening.minOrganic;
 
     if (loserOrganics.length >= 2 && winnerOrganics.length >= 1) {
-      const avgLoserOrganic  = avg(loserOrganics);
+      const avgLoserOrganic = avg(loserOrganics);
       const avgWinnerOrganic = avg(winnerOrganics);
       // Only raise if there's a clear gap (winners consistently more organic)
       if (avgWinnerOrganic - avgLoserOrganic >= 10) {
         // Set floor just below worst winner
         const minWinnerOrganic = Math.min(...winnerOrganics);
         const target = Math.max(minWinnerOrganic - 3, current);
-        const newVal = clamp(Math.round(nudge(current, target, MAX_CHANGE_PER_STEP)), 60, 90);
+        const newVal = clamp(
+          Math.round(nudge(current, target, MAX_CHANGE_PER_STEP)),
+          60,
+          90,
+        );
         if (newVal > current) {
           changes.minOrganic = newVal;
           rationale.minOrganic = `Winner avg organic ${avgWinnerOrganic.toFixed(0)} vs loser avg ${avgLoserOrganic.toFixed(0)} — raised from ${current} → ${newVal}`;
@@ -334,7 +376,11 @@ export function evolveThresholds(perfData, config) {
   // ── Persist changes to user-config.json ───────────────────────
   let userConfig = {};
   if (fs.existsSync(USER_CONFIG_PATH)) {
-    try { userConfig = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")); } catch { /* ignore */ }
+    try {
+      userConfig = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"));
+    } catch {
+      /* ignore */
+    }
   }
 
   Object.assign(userConfig, changes);
@@ -345,15 +391,20 @@ export function evolveThresholds(perfData, config) {
 
   // Apply to live config object immediately
   const s = config.screening;
-  if (changes.maxVolatility    != null) s.maxVolatility    = changes.maxVolatility;
-  if (changes.minFeeTvlRatio   != null) s.minFeeTvlRatio   = changes.minFeeTvlRatio;
-  if (changes.minOrganic       != null) s.minOrganic       = changes.minOrganic;
+  if (changes.maxVolatility != null) s.maxVolatility = changes.maxVolatility;
+  if (changes.minFeeActiveTvlRatio != null)
+    s.minFeeActiveTvlRatio = changes.minFeeActiveTvlRatio;
+  if (changes.minOrganic != null) s.minOrganic = changes.minOrganic;
 
   // Log a lesson summarizing the evolution
   const data = load();
   data.lessons.push({
     id: Date.now(),
-    rule: `[AUTO-EVOLVED @ ${perfData.length} positions] ${Object.entries(changes).map(([k, v]) => `${k}=${v}`).join(", ")} — ${Object.values(rationale).join("; ")}`,
+    rule: `[AUTO-EVOLVED @ ${perfData.length} positions] ${Object.entries(
+      changes,
+    )
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ")} — ${Object.values(rationale).join("; ")}`,
     tags: ["evolution", "config_change"],
     outcome: "manual",
     created_at: new Date().toISOString(),
@@ -404,7 +455,11 @@ function nudge(current, target, maxChange) {
  * @param {boolean}  opts.pinned - Always inject regardless of cap
  * @param {string}   opts.role   - "SCREENER" | "MANAGER" | "GENERAL" | null (all roles)
  */
-export function addLesson(rule, tags = [], { pinned = false, role = null } = {}) {
+export function addLesson(
+  rule,
+  tags = [],
+  { pinned = false, role = null } = {},
+) {
   const data = load();
   data.lessons.push({
     id: Date.now(),
@@ -416,7 +471,10 @@ export function addLesson(rule, tags = [], { pinned = false, role = null } = {})
     created_at: new Date().toISOString(),
   });
   save(data);
-  log("lessons", `Manual lesson added${pinned ? " [PINNED]" : ""}${role ? ` [${role}]` : ""}: ${rule}`);
+  log(
+    "lessons",
+    `Manual lesson added${pinned ? " [PINNED]" : ""}${role ? ` [${role}]` : ""}: ${rule}`,
+  );
 }
 
 /**
@@ -447,13 +505,18 @@ export function unpinLesson(id) {
 /**
  * List lessons with optional filters — for agent browsing via Telegram.
  */
-export function listLessons({ role = null, pinned = null, tag = null, limit = 30 } = {}) {
+export function listLessons({
+  role = null,
+  pinned = null,
+  tag = null,
+  limit = 30,
+} = {}) {
   const data = load();
   let lessons = [...data.lessons];
 
   if (pinned !== null) lessons = lessons.filter((l) => !!l.pinned === pinned);
-  if (role)            lessons = lessons.filter((l) => !l.role || l.role === role);
-  if (tag)             lessons = lessons.filter((l) => l.tags?.includes(tag));
+  if (role) lessons = lessons.filter((l) => !l.role || l.role === role);
+  if (tag) lessons = lessons.filter((l) => l.tags?.includes(tag));
 
   return {
     total: lessons.length,
@@ -518,9 +581,31 @@ export function clearPerformance() {
 
 // Tags that map to each agent role — used for role-aware lesson injection
 const ROLE_TAGS = {
-  SCREENER: ["screening", "narrative", "strategy", "deployment", "token", "volume", "entry", "bundler", "holders", "organic"],
-  MANAGER:  ["management", "risk", "oor", "fees", "position", "hold", "close", "pnl", "rebalance", "claim"],
-  GENERAL:  [], // all lessons
+  SCREENER: [
+    "screening",
+    "narrative",
+    "strategy",
+    "deployment",
+    "token",
+    "volume",
+    "entry",
+    "bundler",
+    "holders",
+    "organic",
+  ],
+  MANAGER: [
+    "management",
+    "risk",
+    "oor",
+    "fees",
+    "position",
+    "hold",
+    "close",
+    "pnl",
+    "rebalance",
+    "claim",
+  ],
+  GENERAL: [], // all lessons
 };
 
 /**
@@ -545,17 +630,31 @@ export function getLessonsForPrompt(opts = {}) {
 
   // Smaller caps for automated cycles — they don't need the full lesson history
   const isAutoCycle = agentType === "SCREENER" || agentType === "MANAGER";
-  const PINNED_CAP  = isAutoCycle ? 5  : 10;
-  const ROLE_CAP    = isAutoCycle ? 6  : 15;
-  const RECENT_CAP  = maxLessons ?? (isAutoCycle ? 10 : 35);
+  const PINNED_CAP = isAutoCycle ? 5 : 10;
+  const ROLE_CAP = isAutoCycle ? 6 : 15;
+  const RECENT_CAP = maxLessons ?? (isAutoCycle ? 10 : 35);
 
-  const outcomePriority = { bad: 0, poor: 1, failed: 1, good: 2, worked: 2, manual: 1, neutral: 3, evolution: 2 };
-  const byPriority = (a, b) => (outcomePriority[a.outcome] ?? 3) - (outcomePriority[b.outcome] ?? 3);
+  const outcomePriority = {
+    bad: 0,
+    poor: 1,
+    failed: 1,
+    good: 2,
+    worked: 2,
+    manual: 1,
+    neutral: 3,
+    evolution: 2,
+  };
+  const byPriority = (a, b) =>
+    (outcomePriority[a.outcome] ?? 3) - (outcomePriority[b.outcome] ?? 3);
 
   // ── Tier 1: Pinned ──────────────────────────────────────────────
   // Respect role even for pinned lessons — a pinned SCREENER lesson shouldn't pollute MANAGER
   const pinned = data.lessons
-    .filter((l) => l.pinned && (!l.role || l.role === agentType || agentType === "GENERAL"))
+    .filter(
+      (l) =>
+        l.pinned &&
+        (!l.role || l.role === agentType || agentType === "GENERAL"),
+    )
     .sort(byPriority)
     .slice(0, PINNED_CAP);
 
@@ -569,7 +668,10 @@ export function getLessonsForPrompt(opts = {}) {
       // Include if: lesson has no role restriction OR matches this role
       const roleOk = !l.role || l.role === agentType || agentType === "GENERAL";
       // Include if: lesson has role-relevant tags OR no tags (general)
-      const tagOk  = roleTags.length === 0 || !l.tags?.length || l.tags.some((t) => roleTags.includes(t));
+      const tagOk =
+        roleTags.length === 0 ||
+        !l.tags?.length ||
+        l.tags.some((t) => roleTags.includes(t));
       return roleOk && tagOk;
     })
     .sort(byPriority)
@@ -579,30 +681,42 @@ export function getLessonsForPrompt(opts = {}) {
 
   // ── Tier 3: Recent fill ─────────────────────────────────────────
   const remainingBudget = RECENT_CAP - pinned.length - roleMatched.length;
-  const recent = remainingBudget > 0
-    ? data.lessons
-        .filter((l) => !usedIds.has(l.id))
-        .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
-        .slice(0, remainingBudget)
-    : [];
+  const recent =
+    remainingBudget > 0
+      ? data.lessons
+          .filter((l) => !usedIds.has(l.id))
+          .sort((a, b) =>
+            (b.created_at || "").localeCompare(a.created_at || ""),
+          )
+          .slice(0, remainingBudget)
+      : [];
 
   const selected = [...pinned, ...roleMatched, ...recent];
   if (selected.length === 0) return null;
 
   const sections = [];
-  if (pinned.length)      sections.push(`── PINNED (${pinned.length}) ──\n` + fmt(pinned));
-  if (roleMatched.length) sections.push(`── ${agentType} (${roleMatched.length}) ──\n` + fmt(roleMatched));
-  if (recent.length)      sections.push(`── RECENT (${recent.length}) ──\n` + fmt(recent));
+  if (pinned.length)
+    sections.push(`── PINNED (${pinned.length}) ──\n` + fmt(pinned));
+  if (roleMatched.length)
+    sections.push(
+      `── ${agentType} (${roleMatched.length}) ──\n` + fmt(roleMatched),
+    );
+  if (recent.length)
+    sections.push(`── RECENT (${recent.length}) ──\n` + fmt(recent));
 
   return sections.join("\n\n");
 }
 
 function fmt(lessons) {
-  return lessons.map((l) => {
-    const date = l.created_at ? l.created_at.slice(0, 16).replace("T", " ") : "unknown";
-    const pin  = l.pinned ? "📌 " : "";
-    return `${pin}[${l.outcome.toUpperCase()}] [${date}] ${l.rule}`;
-  }).join("\n");
+  return lessons
+    .map((l) => {
+      const date = l.created_at
+        ? l.created_at.slice(0, 16).replace("T", " ")
+        : "unknown";
+      const pin = l.pinned ? "📌 " : "";
+      return `${pin}[${l.outcome.toUpperCase()}] [${date}] ${l.rule}`;
+    })
+    .join("\n");
 }
 
 /**
@@ -644,7 +758,8 @@ export function getPerformanceHistory({ hours = 24, limit = 50 } = {}) {
     hours,
     count: filtered.length,
     total_pnl_usd: Math.round(totalPnl * 100) / 100,
-    win_rate_pct: filtered.length > 0 ? Math.round((wins / filtered.length) * 100) : null,
+    win_rate_pct:
+      filtered.length > 0 ? Math.round((wins / filtered.length) * 100) : null,
     positions: filtered,
   };
 }
@@ -660,7 +775,8 @@ export function getPerformanceSummary() {
 
   const totalPnl = p.reduce((s, x) => s + x.pnl_usd, 0);
   const avgPnlPct = p.reduce((s, x) => s + x.pnl_pct, 0) / p.length;
-  const avgRangeEfficiency = p.reduce((s, x) => s + x.range_efficiency, 0) / p.length;
+  const avgRangeEfficiency =
+    p.reduce((s, x) => s + x.range_efficiency, 0) / p.length;
   const wins = p.filter((x) => x.pnl_usd > 0).length;
 
   return {
