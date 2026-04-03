@@ -11,14 +11,41 @@ import {
 } from "./dlmm.js";
 import { getWalletBalances, swapToken } from "./wallet.js";
 import { studyTopLPers } from "./study.js";
-import { addLesson, clearAllLessons, clearPerformance, removeLessonsByKeyword, getPerformanceHistory, pinLesson, unpinLesson, listLessons } from "../lessons.js";
+import {
+  addLesson,
+  clearAllLessons,
+  clearPerformance,
+  removeLessonsByKeyword,
+  getPerformanceHistory,
+  pinLesson,
+  unpinLesson,
+  listLessons,
+} from "../lessons.js";
 import { setPositionInstruction } from "../state.js";
 
 import { getPoolMemory, addPoolNote } from "../pool-memory.js";
-import { addStrategy, listStrategies, getStrategy, setActiveStrategy, removeStrategy } from "../strategy-library.js";
-import { addToBlacklist, removeFromBlacklist, listBlacklist } from "../token-blacklist.js";
+import {
+  addStrategy,
+  listStrategies,
+  getStrategy,
+  setActiveStrategy,
+  removeStrategy,
+  recordStrategyPerformance,
+  getActiveStrategy,
+  recommendStrategy,
+} from "../strategy-library.js";
+import {
+  addToBlacklist,
+  removeFromBlacklist,
+  listBlacklist,
+} from "../token-blacklist.js";
 import { blockDev, unblockDev, listBlockedDevs } from "../dev-blocklist.js";
-import { addSmartWallet, removeSmartWallet, listSmartWallets, checkSmartWalletsOnPool } from "../smart-wallets.js";
+import {
+  addSmartWallet,
+  removeSmartWallet,
+  listSmartWallets,
+  checkSmartWalletsOnPool,
+} from "../smart-wallets.js";
 import { getTokenInfo, getTokenHolders, getTokenNarrative } from "./token.js";
 import { config, reloadScreeningThresholds } from "../config.js";
 import fs from "fs";
@@ -33,7 +60,9 @@ import { notifyDeploy, notifyClose, notifySwap } from "../telegram.js";
 
 // Registered by index.js so update_config can restart cron jobs when intervals change
 let _cronRestarter = null;
-export function registerCronRestarter(fn) { _cronRestarter = fn; }
+export function registerCronRestarter(fn) {
+  _cronRestarter = fn;
+}
 
 // Map tool names to implementations
 const toolMap = {
@@ -61,14 +90,26 @@ const toolMap = {
   study_top_lpers: studyTopLPers,
   set_position_note: ({ position_address, instruction }) => {
     const ok = setPositionInstruction(position_address, instruction || null);
-    if (!ok) return { error: `Position ${position_address} not found in state` };
-    return { saved: true, position: position_address, instruction: instruction || null };
+    if (!ok)
+      return { error: `Position ${position_address} not found in state` };
+    return {
+      saved: true,
+      position: position_address,
+      instruction: instruction || null,
+    };
   },
   self_update: async () => {
     try {
-      const result = execSync("git pull", { cwd: process.cwd(), encoding: "utf8" }).trim();
+      const result = execSync("git pull", {
+        cwd: process.cwd(),
+        encoding: "utf8",
+      }).trim();
       if (result.includes("Already up to date")) {
-        return { success: true, updated: false, message: "Already up to date — no restart needed." };
+        return {
+          success: true,
+          updated: false,
+          message: "Already up to date — no restart needed.",
+        };
       }
       // Delay restart so this tool response (and Telegram message) gets sent first
       setTimeout(() => {
@@ -80,17 +121,22 @@ const toolMap = {
         child.unref();
         process.exit(0);
       }, 3000);
-      return { success: true, updated: true, message: `Updated! Restarting in 3s...\n${result}` };
+      return {
+        success: true,
+        updated: true,
+        message: `Updated! Restarting in 3s...\n${result}`,
+      };
     } catch (e) {
       return { success: false, error: e.message };
     }
   },
   get_performance_history: getPerformanceHistory,
-  add_strategy:        addStrategy,
-  list_strategies:     listStrategies,
-  get_strategy:        getStrategy,
+  add_strategy: addStrategy,
+  list_strategies: listStrategies,
+  get_strategy: getStrategy,
   set_active_strategy: setActiveStrategy,
-  remove_strategy:     removeStrategy,
+  remove_strategy: removeStrategy,
+  recommend_strategy: recommendStrategy,
   get_pool_memory: getPoolMemory,
   add_pool_note: addPoolNote,
   add_to_blacklist: addToBlacklist,
@@ -103,9 +149,10 @@ const toolMap = {
     addLesson(rule, tags || [], { pinned: !!pinned, role: role || null });
     return { saved: true, rule, pinned: !!pinned, role: role || "all" };
   },
-  pin_lesson:   ({ id }) => pinLesson(id),
+  pin_lesson: ({ id }) => pinLesson(id),
   unpin_lesson: ({ id }) => unpinLesson(id),
-  list_lessons: ({ role, pinned, tag, limit } = {}) => listLessons({ role, pinned, tag, limit }),
+  list_lessons: ({ role, pinned, tag, limit } = {}) =>
+    listLessons({ role, pinned, tag, limit }),
   clear_lessons: ({ mode, keyword }) => {
     if (mode === "all") {
       const n = clearAllLessons();
@@ -142,12 +189,12 @@ const toolMap = {
       timeframe: ["screening", "timeframe"],
       category: ["screening", "category"],
       minTokenFeesSol: ["screening", "minTokenFeesSol"],
-      maxBundlePct:     ["screening", "maxBundlePct"],
+      maxBundlePct: ["screening", "maxBundlePct"],
       maxBotHoldersPct: ["screening", "maxBotHoldersPct"],
       maxTop10Pct: ["screening", "maxTop10Pct"],
       minTokenAgeHours: ["screening", "minTokenAgeHours"],
       maxTokenAgeHours: ["screening", "maxTokenAgeHours"],
-      athFilterPct:     ["screening", "athFilterPct"],
+      athFilterPct: ["screening", "athFilterPct"],
       minFeePerTvl24h: ["management", "minFeePerTvl24h"],
       // management
       minClaimAmount: ["management", "minClaimAmount"],
@@ -184,17 +231,25 @@ const toolMap = {
 
     // Build case-insensitive lookup
     const CONFIG_MAP_LOWER = Object.fromEntries(
-      Object.entries(CONFIG_MAP).map(([k, v]) => [k.toLowerCase(), [k, v]])
+      Object.entries(CONFIG_MAP).map(([k, v]) => [k.toLowerCase(), [k, v]]),
     );
 
     for (const [key, val] of Object.entries(changes)) {
-      const match = CONFIG_MAP[key] ? [key, CONFIG_MAP[key]] : CONFIG_MAP_LOWER[key.toLowerCase()];
-      if (!match) { unknown.push(key); continue; }
+      const match = CONFIG_MAP[key]
+        ? [key, CONFIG_MAP[key]]
+        : CONFIG_MAP_LOWER[key.toLowerCase()];
+      if (!match) {
+        unknown.push(key);
+        continue;
+      }
       applied[match[0]] = val;
     }
 
     if (Object.keys(applied).length === 0) {
-      log("config", `update_config failed — unknown keys: ${JSON.stringify(unknown)}, raw changes: ${JSON.stringify(changes)}`);
+      log(
+        "config",
+        `update_config failed — unknown keys: ${JSON.stringify(unknown)}, raw changes: ${JSON.stringify(changes)}`,
+      );
       return { success: false, unknown, reason };
     }
 
@@ -203,34 +258,49 @@ const toolMap = {
       const [section, field] = CONFIG_MAP[key];
       const before = config[section][field];
       config[section][field] = val;
-      log("config", `update_config: config.${section}.${field} ${before} → ${val} (verify: ${config[section][field]})`);
+      log(
+        "config",
+        `update_config: config.${section}.${field} ${before} → ${val} (verify: ${config[section][field]})`,
+      );
     }
 
     // Persist to user-config.json
     let userConfig = {};
     if (fs.existsSync(USER_CONFIG_PATH)) {
-      try { userConfig = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")); } catch { /**/ }
+      try {
+        userConfig = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"));
+      } catch {
+        /**/
+      }
     }
     Object.assign(userConfig, applied);
     userConfig._lastAgentTune = new Date().toISOString();
     fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
 
     // Restart cron jobs if intervals changed
-    const intervalChanged = applied.managementIntervalMin != null || applied.screeningIntervalMin != null;
+    const intervalChanged =
+      applied.managementIntervalMin != null ||
+      applied.screeningIntervalMin != null;
     if (intervalChanged && _cronRestarter) {
       _cronRestarter();
-      log("config", `Cron restarted — management: ${config.schedule.managementIntervalMin}m, screening: ${config.schedule.screeningIntervalMin}m`);
+      log(
+        "config",
+        `Cron restarted — management: ${config.schedule.managementIntervalMin}m, screening: ${config.schedule.screeningIntervalMin}m`,
+      );
     }
 
     // Save as a lesson — but skip ephemeral per-deploy interval changes
     // (managementIntervalMin / screeningIntervalMin change every deploy based on volatility;
     //  the rule is already in the system prompt, storing it 75+ times is pure noise)
     const lessonsKeys = Object.keys(applied).filter(
-      k => k !== "managementIntervalMin" && k !== "screeningIntervalMin"
+      (k) => k !== "managementIntervalMin" && k !== "screeningIntervalMin",
     );
     if (lessonsKeys.length > 0) {
-      const summary = lessonsKeys.map(k => `${k}=${applied[k]}`).join(", ");
-      addLesson(`[SELF-TUNED] Changed ${summary} — ${reason}`, ["self_tune", "config_change"]);
+      const summary = lessonsKeys.map((k) => `${k}=${applied[k]}`).join(", ");
+      addLesson(`[SELF-TUNED] Changed ${summary} — ${reason}`, [
+        "self_tune",
+        "config_change",
+      ]);
     }
 
     log("config", `Agent self-tuned: ${JSON.stringify(applied)} — ${reason}`);
@@ -291,40 +361,100 @@ export async function executeTool(name, args) {
 
     if (success) {
       if (name === "swap_token" && result.tx) {
-        notifySwap({ inputSymbol: args.input_mint?.slice(0, 8), outputSymbol: args.output_mint === "So11111111111111111111111111111111111111112" || args.output_mint === "SOL" ? "SOL" : args.output_mint?.slice(0, 8), amountIn: result.amount_in, amountOut: result.amount_out, tx: result.tx }).catch(() => {});
+        notifySwap({
+          inputSymbol: args.input_mint?.slice(0, 8),
+          outputSymbol:
+            args.output_mint ===
+              "So11111111111111111111111111111111111111112" ||
+            args.output_mint === "SOL"
+              ? "SOL"
+              : args.output_mint?.slice(0, 8),
+          amountIn: result.amount_in,
+          amountOut: result.amount_out,
+          tx: result.tx,
+        }).catch(() => {});
       } else if (name === "deploy_position") {
-        notifyDeploy({ pair: result.pool_name || args.pool_name || args.pool_address?.slice(0, 8), amountSol: args.amount_y ?? args.amount_sol ?? 0, position: result.position, tx: result.txs?.[0] ?? result.tx, priceRange: result.price_range, binStep: result.bin_step, baseFee: result.base_fee }).catch(() => {});
+        notifyDeploy({
+          pair:
+            result.pool_name ||
+            args.pool_name ||
+            args.pool_address?.slice(0, 8),
+          amountSol: args.amount_y ?? args.amount_sol ?? 0,
+          position: result.position,
+          tx: result.txs?.[0] ?? result.tx,
+          priceRange: result.price_range,
+          binStep: result.bin_step,
+          baseFee: result.base_fee,
+        }).catch(() => {});
       } else if (name === "close_position") {
-        notifyClose({ pair: result.pool_name || args.position_address?.slice(0, 8), pnlUsd: result.pnl_usd ?? 0, pnlPct: result.pnl_pct ?? 0 }).catch(() => {});
+        notifyClose({
+          pair: result.pool_name || args.position_address?.slice(0, 8),
+          pnlUsd: result.pnl_usd ?? 0,
+          pnlPct: result.pnl_pct ?? 0,
+        }).catch(() => {});
+        // Record PnL against the active strategy for performance tracking
+        if (result.pnl_pct != null) {
+          const activeStrategy = getActiveStrategy();
+          if (activeStrategy?.id) {
+            recordStrategyPerformance(activeStrategy.id, result.pnl_pct);
+          }
+        }
         // Note low-yield closes in pool memory so screener avoids redeploying
         if (args.reason && args.reason.toLowerCase().includes("yield")) {
           const poolAddr = result.pool || args.pool_address;
-          if (poolAddr) addPoolNote({ pool_address: poolAddr, note: `Closed: low yield (fee/TVL below threshold) at ${new Date().toISOString().slice(0,10)}` }).catch?.(() => {});
+          if (poolAddr)
+            addPoolNote({
+              pool_address: poolAddr,
+              note: `Closed: low yield (fee/TVL below threshold) at ${new Date().toISOString().slice(0, 10)}`,
+            }).catch?.(() => {});
         }
         // Auto-swap base token back to SOL unless user said to hold
         if (!args.skip_swap && result.base_mint) {
           try {
             const balances = await getWalletBalances({});
-            const token = balances.tokens?.find(t => t.mint === result.base_mint);
-            if (token && token.usd >= 0.10) {
-              log("executor", `Auto-swapping ${token.symbol || result.base_mint.slice(0, 8)} ($${token.usd.toFixed(2)}) back to SOL`);
-              const swapResult = await swapToken({ input_mint: result.base_mint, output_mint: "SOL", amount: token.balance });
+            const token = balances.tokens?.find(
+              (t) => t.mint === result.base_mint,
+            );
+            if (token && token.usd >= 0.1) {
+              log(
+                "executor",
+                `Auto-swapping ${token.symbol || result.base_mint.slice(0, 8)} ($${token.usd.toFixed(2)}) back to SOL`,
+              );
+              const swapResult = await swapToken({
+                input_mint: result.base_mint,
+                output_mint: "SOL",
+                amount: token.balance,
+              });
               // Tell the model the swap already happened so it doesn't call swap_token again
               result.auto_swapped = true;
               result.auto_swap_note = `Base token already auto-swapped back to SOL (${token.symbol || result.base_mint.slice(0, 8)} → SOL). Do NOT call swap_token again.`;
-              if (swapResult?.amount_out) result.sol_received = swapResult.amount_out;
+              if (swapResult?.amount_out)
+                result.sol_received = swapResult.amount_out;
             }
           } catch (e) {
             log("executor_warn", `Auto-swap after close failed: ${e.message}`);
           }
         }
-      } else if (name === "claim_fees" && config.management.autoSwapAfterClaim && result.base_mint) {
+      } else if (
+        name === "claim_fees" &&
+        config.management.autoSwapAfterClaim &&
+        result.base_mint
+      ) {
         try {
           const balances = await getWalletBalances({});
-          const token = balances.tokens?.find(t => t.mint === result.base_mint);
-          if (token && token.usd >= 0.10) {
-            log("executor", `Auto-swapping claimed ${token.symbol || result.base_mint.slice(0, 8)} ($${token.usd.toFixed(2)}) back to SOL`);
-            await swapToken({ input_mint: result.base_mint, output_mint: "SOL", amount: token.balance });
+          const token = balances.tokens?.find(
+            (t) => t.mint === result.base_mint,
+          );
+          if (token && token.usd >= 0.1) {
+            log(
+              "executor",
+              `Auto-swapping claimed ${token.symbol || result.base_mint.slice(0, 8)} ($${token.usd.toFixed(2)}) back to SOL`,
+            );
+            await swapToken({
+              input_mint: result.base_mint,
+              output_mint: "SOL",
+              amount: token.balance,
+            });
           }
         } catch (e) {
           log("executor_warn", `Auto-swap after claim failed: ${e.message}`);
@@ -361,7 +491,10 @@ async function runSafetyChecks(name, args) {
       // Reject pools with bin_step out of configured range
       const minStep = config.screening.minBinStep;
       const maxStep = config.screening.maxBinStep;
-      if (args.bin_step != null && (args.bin_step < minStep || args.bin_step > maxStep)) {
+      if (
+        args.bin_step != null &&
+        (args.bin_step < minStep || args.bin_step > maxStep)
+      ) {
         return {
           pass: false,
           reason: `bin_step ${args.bin_step} is outside the allowed range of [${minStep}-${maxStep}].`,
@@ -377,7 +510,7 @@ async function runSafetyChecks(name, args) {
         };
       }
       const alreadyInPool = positions.positions.some(
-        (p) => p.pool === args.pool_address
+        (p) => p.pool === args.pool_address,
       );
       if (alreadyInPool) {
         return {
@@ -389,7 +522,7 @@ async function runSafetyChecks(name, args) {
       // Block same base token across different pools
       if (args.base_mint) {
         const alreadyHasMint = positions.positions.some(
-          (p) => p.base_mint === args.base_mint
+          (p) => p.base_mint === args.base_mint,
         );
         if (alreadyHasMint) {
           return {
