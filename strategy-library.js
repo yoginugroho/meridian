@@ -23,7 +23,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STRATEGY_FILE = path.join(__dirname, "strategy-library.json");
 
 // Bump this whenever DEFAULT_STRATEGIES content changes — triggers auto-update of built-ins
-const BUILTIN_VERSION = 4;
+const BUILTIN_VERSION = 5;
 
 // ─── Persistence ────────────────────────────────────────────────
 
@@ -75,6 +75,7 @@ const DEFAULT_STRATEGIES = {
     },
     exit: {
       take_profit_pct: 5,
+      oor_timeout_minutes: 30,
       notes:
         "TP 3–10%+ when price rebounds and sweeps range + fees collected. Close early on no-recovery signal (volume dying, narrative breaking). OOR handling: reposition or cut if narrative breaks. No auto re-seed. Hold overnight/multi-hour — designed for sleep plays.",
     },
@@ -112,11 +113,20 @@ const DEFAULT_STRATEGIES = {
     },
     exit: {
       take_profit_pct: 15,
+      oor_timeout_minutes: 5,
       notes:
         "Phase 1: withdraw (NOT close) once SOL is mostly converted to tokens. Phase 2: flip to single-sided token bid-ask at same range. TP 15%+ from dip or when price returns to ATH/lower high. Exit on OOR if still bullish with conviction. Re-seed only on same token if momentum continues. High-frequency compounding via multiple cycles.",
     },
     best_for:
       "Active momentum runners with clear retrace → pump pattern. Beats pure spot via fees + IL profit. High frequency compounding.",
+    phase2: {
+      single_side: "token",
+      bins_below: 0,
+      bins_above: 15,
+      oor_timeout_minutes: 15,
+      notes:
+        "Token-only flip: deploy tokens in bins ABOVE active bin (range for recovery). Same pool. Wait for price to pump back through range.",
+    },
   },
 
   tight_bid_ask_quick_flips: {
@@ -147,6 +157,7 @@ const DEFAULT_STRATEGIES = {
     },
     exit: {
       take_profit_pct: 5,
+      oor_timeout_minutes: 5,
       notes:
         "TP when price rebounds and position starts going OOR upward (often 5–20 min holds). Quick close + re-seed same token if still pumping. Cut FAST on dead volume — do not hold dead positions. Multiple re-seeds per session on same token if momentum holds.",
     },
@@ -181,11 +192,20 @@ const DEFAULT_STRATEGIES = {
     },
     exit: {
       take_profit_pct: 20,
+      oor_timeout_minutes: 10,
       notes:
         "Phase 1: close after full SOL→token conversion (not withdraw — full close before Phase 2 deploy). Phase 2: hold for recovery sweep + fees. TP on strong bounce or narrative confirmation. OOR upward in Phase 2 = profit — close and take it. Reposition wider if conviction still high on OOR downside. No re-seed if conviction gone.",
     },
     best_for:
       "High-conviction narrative tokens expecting bounce after ~40% dump. Efficient accumulation on way down + DCA recovery on way up. Avoids crowded wide SOL ranges.",
+    phase2: {
+      single_side: "token",
+      bins_below: 0,
+      bins_above: 69,
+      oor_timeout_minutes: 30,
+      notes:
+        "Wide token-only upside recovery: deploy all recovered tokens in bins_above=69 for 100-300% recovery range. Same pool.",
+    },
   },
 
   afk_passive_bid_ask: {
@@ -218,6 +238,7 @@ const DEFAULT_STRATEGIES = {
     },
     exit: {
       take_profit_pct: 7,
+      oor_timeout_minutes: 180,
       notes:
         "TP 5–10%+ when price dumps into range then rebounds back out. OOR handling: leave it — if it never touches your range you lose nothing (max efficiency). Re-seed only on a fresh new setup with updated VPVR analysis. Set and forget — designed for busy people.",
     },
@@ -252,6 +273,7 @@ const DEFAULT_STRATEGIES = {
     },
     exit: {
       take_profit_pct: null,
+      oor_timeout_minutes: 15,
       notes:
         "Hold until recovery pump or narrative fully breaks. TP on strong pump when position goes OOR upward (price above all your bins) — close and take profit. If OOR downward (price keeps falling past your range bottom) = cut loss, narrative broke. No re-seed if conviction gone. Do not average down infinitely.",
     },

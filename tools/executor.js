@@ -8,6 +8,7 @@ import {
   claimFees,
   closePosition,
   searchPools,
+  withdrawLiquidity,
 } from "./dlmm.js";
 import { getWalletBalances, swapToken } from "./wallet.js";
 import { studyTopLPers } from "./study.js";
@@ -21,7 +22,11 @@ import {
   unpinLesson,
   listLessons,
 } from "../lessons.js";
-import { setPositionInstruction } from "../state.js";
+import {
+  setPositionInstruction,
+  setPositionStrategyMeta,
+  setPositionPhase,
+} from "../state.js";
 
 import { getPoolMemory, addPoolNote } from "../pool-memory.js";
 import {
@@ -84,6 +89,7 @@ const toolMap = {
   check_smart_wallets_on_pool: checkSmartWalletsOnPool,
   claim_fees: claimFees,
   close_position: closePosition,
+  withdraw_liquidity: withdrawLiquidity,
   get_wallet_balance: getWalletBalances,
   swap_token: swapToken,
   get_top_lpers: studyTopLPers,
@@ -313,6 +319,7 @@ const WRITE_TOOLS = new Set([
   "deploy_position",
   "claim_fees",
   "close_position",
+  "withdraw_liquidity",
   "swap_token",
 ]);
 
@@ -386,6 +393,17 @@ export async function executeTool(name, args) {
           binStep: result.bin_step,
           baseFee: result.base_fee,
         }).catch(() => {});
+        // Set strategy metadata on newly deployed position
+        const activeStrategy = getActiveStrategy();
+        if (activeStrategy) {
+          setPositionStrategyMeta(result.position, {
+            strategy_id: activeStrategy.id,
+            phase: args.phase ?? 1,
+            single_side: activeStrategy.entry?.single_side ?? null,
+            oor_timeout_minutes:
+              activeStrategy.exit?.oor_timeout_minutes ?? null,
+          });
+        }
       } else if (name === "close_position") {
         notifyClose({
           pair: result.pool_name || args.position_address?.slice(0, 8),

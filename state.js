@@ -85,7 +85,11 @@ export function trackPosition({
     peak_pnl_pct: 0,
     trailing_active: false,
   };
-  pushEvent(state, { action: "deploy", position, pool_name: pool_name || pool });
+  pushEvent(state, {
+    action: "deploy",
+    position,
+    pool_name: pool_name || pool,
+  });
   save(state);
   log("state", `Tracked new position: ${position} in pool ${pool}`);
 }
@@ -138,8 +142,11 @@ export function recordClaim(position_address, fees_usd) {
   const pos = state.positions[position_address];
   if (!pos) return;
   pos.last_claim_at = new Date().toISOString();
-  pos.total_fees_claimed_usd = (pos.total_fees_claimed_usd || 0) + (fees_usd || 0);
-  pos.notes.push(`Claimed ~$${fees_usd?.toFixed(2) || "?"} fees at ${pos.last_claim_at}`);
+  pos.total_fees_claimed_usd =
+    (pos.total_fees_claimed_usd || 0) + (fees_usd || 0);
+  pos.notes.push(
+    `Claimed ~$${fees_usd?.toFixed(2) || "?"} fees at ${pos.last_claim_at}`,
+  );
   save(state);
 }
 
@@ -164,7 +171,12 @@ export function recordClose(position_address, reason) {
   pos.closed = true;
   pos.closed_at = new Date().toISOString();
   pos.notes.push(`Closed at ${pos.closed_at}: ${reason}`);
-  pushEvent(state, { action: "close", position: position_address, pool_name: pos.pool_name || pos.pool, reason });
+  pushEvent(state, {
+    action: "close",
+    position: position_address,
+    pool_name: pos.pool_name || pos.pool,
+    reason,
+  });
   save(state);
   log("state", `Position ${position_address} marked closed: ${reason}`);
 }
@@ -203,6 +215,53 @@ export function setPositionInstruction(position_address, instruction) {
 }
 
 /**
+ * Attach strategy metadata to a tracked position after successful deploy.
+ * Called from executor.js post-deploy hook.
+ */
+export function setPositionStrategyMeta(
+  position_address,
+  {
+    strategy_id = null,
+    phase = 1,
+    single_side = null,
+    oor_timeout_minutes = null,
+  } = {},
+) {
+  const state = load();
+  const pos = state.positions[position_address];
+  if (!pos) return;
+  pos.strategy_id = strategy_id;
+  pos.phase = phase;
+  pos.single_side = single_side;
+  if (oor_timeout_minutes != null)
+    pos.oor_timeout_minutes = oor_timeout_minutes;
+  save(state);
+  log(
+    "state",
+    `Strategy meta set for ${position_address}: strategy=${strategy_id} phase=${phase} single_side=${single_side} oor=${oor_timeout_minutes}m`,
+  );
+}
+
+/**
+ * Update the phase of a tracked position (e.g. after a phase 1→2 flip).
+ */
+export function setPositionPhase(
+  position_address,
+  phase,
+  { single_side = null, oor_timeout_minutes = null } = {},
+) {
+  const state = load();
+  const pos = state.positions[position_address];
+  if (!pos) return;
+  pos.phase = phase;
+  if (single_side != null) pos.single_side = single_side;
+  if (oor_timeout_minutes != null)
+    pos.oor_timeout_minutes = oor_timeout_minutes;
+  save(state);
+  log("state", `Position ${position_address} phase updated to ${phase}`);
+}
+
+/**
  * Get all tracked positions (optionally filter open-only).
  */
 export function getTrackedPositions(openOnly = false) {
@@ -226,8 +285,10 @@ export function getStateSummary() {
   const state = load();
   const open = Object.values(state.positions).filter((p) => !p.closed);
   const closed = Object.values(state.positions).filter((p) => p.closed);
-  const totalFeesClaimed = Object.values(state.positions)
-    .reduce((sum, p) => sum + (p.total_fees_claimed_usd || 0), 0);
+  const totalFeesClaimed = Object.values(state.positions).reduce(
+    (sum, p) => sum + (p.total_fees_claimed_usd || 0),
+    0,
+  );
 
   return {
     open_positions: open.length,
@@ -258,7 +319,11 @@ export function getStateSummary() {
  * @param {object} mgmtConfig
  * Returns { action, reason } or null if no exit needed.
  */
-export function updatePnlAndCheckExits(position_address, positionData, mgmtConfig) {
+export function updatePnlAndCheckExits(
+  position_address,
+  positionData,
+  mgmtConfig,
+) {
   const { pnl_pct: currentPnlPct, in_range, fee_per_tvl_24h } = positionData;
   const state = load();
   const pos = state.positions[position_address];
@@ -273,10 +338,17 @@ export function updatePnlAndCheckExits(position_address, positionData, mgmtConfi
   }
 
   // Activate trailing TP once trigger threshold is reached
-  if (mgmtConfig.trailingTakeProfit && !pos.trailing_active && currentPnlPct >= mgmtConfig.trailingTriggerPct) {
+  if (
+    mgmtConfig.trailingTakeProfit &&
+    !pos.trailing_active &&
+    currentPnlPct >= mgmtConfig.trailingTriggerPct
+  ) {
     pos.trailing_active = true;
     changed = true;
-    log("state", `Position ${position_address} trailing TP activated at ${currentPnlPct}% (peak: ${pos.peak_pnl_pct}%)`);
+    log(
+      "state",
+      `Position ${position_address} trailing TP activated at ${currentPnlPct}% (peak: ${pos.peak_pnl_pct}%)`,
+    );
   }
 
   // Update OOR state
@@ -293,7 +365,11 @@ export function updatePnlAndCheckExits(position_address, positionData, mgmtConfi
   if (changed) save(state);
 
   // ── Stop loss ──────────────────────────────────────────────────
-  if (currentPnlPct != null && mgmtConfig.stopLossPct != null && currentPnlPct <= mgmtConfig.stopLossPct) {
+  if (
+    currentPnlPct != null &&
+    mgmtConfig.stopLossPct != null &&
+    currentPnlPct <= mgmtConfig.stopLossPct
+  ) {
     return {
       action: "STOP_LOSS",
       reason: `Stop loss: PnL ${currentPnlPct.toFixed(2)}% <= ${mgmtConfig.stopLossPct}%`,
@@ -313,8 +389,13 @@ export function updatePnlAndCheckExits(position_address, positionData, mgmtConfi
 
   // ── Out of range too long ──────────────────────────────────────
   if (pos.out_of_range_since) {
-    const minutesOOR = Math.floor((Date.now() - new Date(pos.out_of_range_since).getTime()) / 60000);
-    if (minutesOOR >= mgmtConfig.outOfRangeWaitMinutes) {
+    const minutesOOR = Math.floor(
+      (Date.now() - new Date(pos.out_of_range_since).getTime()) / 60000,
+    );
+    if (
+      minutesOOR >=
+      (pos.oor_timeout_minutes ?? mgmtConfig.outOfRangeWaitMinutes)
+    ) {
       return {
         action: "OUT_OF_RANGE",
         reason: `Out of range for ${minutesOOR}m (limit: ${mgmtConfig.outOfRangeWaitMinutes}m)`,
@@ -375,9 +456,14 @@ export function syncOpenPositions(active_addresses) {
     if (pos.closed || activeSet.has(posId)) continue;
 
     // Grace period: newly deployed positions may not be indexed yet
-    const deployedAt = pos.deployed_at ? new Date(pos.deployed_at).getTime() : 0;
+    const deployedAt = pos.deployed_at
+      ? new Date(pos.deployed_at).getTime()
+      : 0;
     if (Date.now() - deployedAt < SYNC_GRACE_MS) {
-      log("state", `Position ${posId} not on-chain yet — within grace period, skipping auto-close`);
+      log(
+        "state",
+        `Position ${posId} not on-chain yet — within grace period, skipping auto-close`,
+      );
       continue;
     }
 

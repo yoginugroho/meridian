@@ -213,6 +213,11 @@ WARNING: This executes a real on-chain transaction. Check DRY_RUN mode.`,
             type: "number",
             description: "Estimated USD value being deployed",
           },
+          phase: {
+            type: "number",
+            description:
+              "Position phase number (1 or 2). Used for two-phase strategies like retrace_bid_ask_flip and tight_wide_token_recovery. Default 1. Set to 2 when deploying Phase 2 of a flip strategy.",
+          },
         },
         required: ["pool_address"],
       },
@@ -316,6 +321,48 @@ WARNING: This executes a real on-chain transaction. Cannot be undone.`,
             type: "string",
             description:
               "Why this position is being closed. Include the rule that triggered it, e.g. 'low yield', 'stop loss', 'trailing TP', 'OOR'. Used for pool memory.",
+          },
+        },
+        required: ["position_address"],
+      },
+    },
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "withdraw_liquidity",
+      description: `Partially or fully remove liquidity from a position without necessarily closing the account.
+
+Use cases:
+- Partial harvest: remove 50% (bps=5000) to lock in profit while leaving the rest running
+- Phase flip preparation: remove 100% (bps=10000, keep_open=false) — same as close but with explicit bps control
+- Emergency partial exit: reduce exposure without fully closing
+
+keep_open=true: removes liquidity but keeps position account open (can add liquidity back later — advanced use)
+keep_open=false (default): removes and closes account if bps=10000
+
+WARNING: Real on-chain transaction. Cannot be undone.`,
+      parameters: {
+        type: "object",
+        properties: {
+          position_address: {
+            type: "string",
+            description: "Position address to withdraw from",
+          },
+          bps: {
+            type: "number",
+            description:
+              "Basis points to remove (1–10000). 10000 = remove all (100%). 5000 = remove half. Default 10000.",
+          },
+          keep_open: {
+            type: "boolean",
+            description:
+              "If true, keep the position account open after removal (for re-adding liquidity). Default false.",
+          },
+          reason: {
+            type: "string",
+            description: "Reason for the withdrawal (logged and saved)",
           },
         },
         required: ["position_address"],

@@ -6,6 +6,7 @@ import { tools } from "./tools/definitions.js";
 
 const MANAGER_TOOLS = new Set([
   "close_position",
+  "withdraw_liquidity",
   "claim_fees",
   "swap_token",
   "update_config",

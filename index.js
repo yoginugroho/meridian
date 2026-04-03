@@ -34,6 +34,7 @@ import {
   getStrategyPromptBlock,
   recordStrategyPerformance,
 } from "./strategy-library.js";
+import { setPositionPhase } from "./state.js";
 import {
   recordPositionSnapshot,
   recallForPool,
@@ -175,6 +176,20 @@ export async function runManagementCycle({ silent = false } = {}) {
       }
     }
 
+    // Phase 2 config for two-phase strategies (hardcoded, matches strategy-library.js)
+    const PHASE2_CONFIGS = {
+      retrace_bid_ask_flip: {
+        bins_above: 15,
+        bins_below: 0,
+        oor_timeout_minutes: 15,
+      },
+      tight_wide_token_recovery: {
+        bins_above: 69,
+        bins_below: 0,
+        oor_timeout_minutes: 30,
+      },
+    };
+
     // ── Deterministic rule checks (no LLM) ──────────────────────────
     // action: CLOSE | CLAIM | STAY | INSTRUCTION (needs LLM)
     const actionMap = new Map();
@@ -197,6 +212,48 @@ export async function runManagementCycle({ silent = false } = {}) {
       // Sanity-check PnL against tracked initial deposit — API sometimes returns bad data
       // giving -99% PnL which would incorrectly trigger stop loss
       const tracked = getTrackedPosition(p.position);
+
+      // ── Rule 6: OOR downward — token-only position (phase 2 or token_sided_deep_dump)
+      // Price dropped below lower_bin → narrative broke, cut loss immediately without waiting
+      if (
+        p.active_bin != null &&
+        p.lower_bin != null &&
+        p.active_bin < p.lower_bin &&
+        !p.in_range &&
+        (tracked?.single_side === "token" || tracked?.phase === 2)
+      ) {
+        actionMap.set(p.position, {
+          action: "CLOSE",
+          rule: 6,
+          reason:
+            "OOR down — token-only position dropped below range (narrative broke)",
+        });
+        continue;
+      }
+
+      // ── Rule 7: Phase 1 complete — SOL-only two-phase strategy went OOR downward
+      // active_bin < lower_bin for a SOL-only phase-1 position means all SOL bins have been
+      // swept and converted to tokens. Trigger the phase flip.
+      if (
+        p.active_bin != null &&
+        p.lower_bin != null &&
+        p.active_bin < p.lower_bin &&
+        !p.in_range &&
+        tracked?.phase === 1 &&
+        tracked?.single_side === "sol" &&
+        PHASE2_CONFIGS[tracked?.strategy_id]
+      ) {
+        actionMap.set(p.position, {
+          action: "PHASE_FLIP",
+          rule: 7,
+          reason: `Phase 1 complete — all SOL converted to tokens (strategy: ${tracked.strategy_id})`,
+          strategy_id: tracked.strategy_id,
+          pool: p.pool,
+          phase2: PHASE2_CONFIGS[tracked.strategy_id],
+        });
+        continue;
+      }
+
       const pnlSuspect = (() => {
         if (p.pnl_pct == null) return false;
         if (p.pnl_pct > -90) return false; // only flag extreme negatives
@@ -250,14 +307,15 @@ export async function runManagementCycle({ silent = false } = {}) {
         });
         continue;
       }
-      // Rule 4: stale above range
-      if (
-        p.active_bin != null &&
-        p.upper_bin != null &&
-        p.active_bin > p.upper_bin &&
-        (p.minutes_out_of_range ?? 0) >= config.management.outOfRangeWaitMinutes
-      ) {
-        actionMap.set(p.position, { action: "CLOSE", rule: 4, reason: "OOR" });
+      // Rule 4: stale above/below range — use per-position OOR timeout if set
+      const oorTimeout =
+        tracked?.oor_timeout_minutes ?? config.management.outOfRangeWaitMinutes;
+      if (!p.in_range && (p.minutes_out_of_range ?? 0) >= oorTimeout) {
+        actionMap.set(p.position, {
+          action: "CLOSE",
+          rule: 4,
+          reason: `OOR >${oorTimeout}m`,
+        });
         continue;
       }
       // Rule 5: fee yield too low
@@ -293,6 +351,7 @@ export async function runManagementCycle({ silent = false } = {}) {
 
     const reportLines = positionData.map((p) => {
       const act = actionMap.get(p.position);
+      const tracked = getTrackedPosition(p.position);
       const inRange = p.in_range
         ? "🟢 IN"
         : `🔴 OOR ${p.minutes_out_of_range ?? 0}m`;
@@ -304,12 +363,17 @@ export async function runManagementCycle({ silent = false } = {}) {
         : `$${p.unclaimed_fees_usd ?? "?"}`;
       const statusLabel =
         act.action === "INSTRUCTION" ? "HOLD (instruction)" : act.action;
-      let line = `**${p.pair}** | Age: ${p.age_minutes ?? "?"}m | Val: ${val} | Unclaimed: ${unclaimed} | PnL: ${p.pnl_pct ?? "?"}% | Yield: ${p.fee_per_tvl_24h ?? "?"}% | ${inRange} | ${statusLabel}`;
+      const stratLabel = tracked?.strategy_id
+        ? ` [${tracked.strategy_id}${tracked.phase ? ` P${tracked.phase}` : ""}]`
+        : "";
+      let line = `**${p.pair}**${stratLabel} | Age: ${p.age_minutes ?? "?"}m | Val: ${val} | Unclaimed: ${unclaimed} | PnL: ${p.pnl_pct ?? "?"}% | Yield: ${p.fee_per_tvl_24h ?? "?"}% | ${inRange} | ${statusLabel}`;
       if (p.instruction) line += `\nNote: "${p.instruction}"`;
       if (act.action === "CLOSE" && act.rule === "exit")
         line += `\n⚡ Trailing TP: ${act.reason}`;
       if (act.action === "CLOSE" && act.rule && act.rule !== "exit")
         line += `\nRule ${act.rule}: ${act.reason}`;
+      if (act.action === "PHASE_FLIP")
+        line += `\n🔄 Phase flip → Phase 2 (${act.strategy_id})`;
       if (act.action === "CLAIM") line += `\n→ Claiming fees`;
       return line;
     });
@@ -339,22 +403,127 @@ export async function runManagementCycle({ silent = false } = {}) {
       return a.action !== "STAY";
     });
 
-    if (actionPositions.length > 0) {
+    // ── Execute PHASE_FLIP actions deterministically (no LLM needed) ──
+    const phaseFlipPositions = actionPositions.filter(
+      (p) => actionMap.get(p.position)?.action === "PHASE_FLIP",
+    );
+    for (const p of phaseFlipPositions) {
+      const act = actionMap.get(p.position);
+      const ph2 = act.phase2;
       log(
         "cron",
-        `Management: ${actionPositions.length} action(s) needed — invoking LLM [model: ${config.llm.managementModel}]`,
+        `Phase flip: closing Phase 1 of ${p.pair} (${act.strategy_id}) — will redeploy token-only Phase 2`,
+      );
+      try {
+        // Step 1: Close Phase 1, keeping tokens in wallet (skip auto-swap)
+        const { closePosition } = await import("./tools/dlmm.js");
+        const closeResult = await closePosition({
+          position_address: p.position,
+          reason: `Phase 1 complete — flipping to Phase 2 (${act.strategy_id})`,
+          skip_swap: true,
+        });
+
+        if (!closeResult?.success) {
+          log(
+            "cron_warn",
+            `Phase flip: close failed for ${p.pair}: ${closeResult?.error}`,
+          );
+          continue;
+        }
+
+        // Step 2: Brief wait for RPC to settle
+        await new Promise((r) => setTimeout(r, 3000));
+
+        // Step 3: Get token balance
+        const { getWalletBalances } = await import("./tools/wallet.js");
+        const balances = await getWalletBalances({});
+        const tokenBalance = balances?.tokens?.find(
+          (t) => t.mint === closeResult.base_mint,
+        );
+
+        if (!tokenBalance || tokenBalance.balance <= 0) {
+          log(
+            "cron_warn",
+            `Phase flip: no token balance found after Phase 1 close for ${p.pair}`,
+          );
+          continue;
+        }
+
+        log(
+          "cron",
+          `Phase flip: deploying Phase 2 — ${tokenBalance.balance} ${tokenBalance.symbol ?? "tokens"} into ${act.pool} (bins_above=${ph2.bins_above})`,
+        );
+
+        // Step 4: Deploy Phase 2 (token-only, wide upside)
+        const { deployPosition } = await import("./tools/dlmm.js");
+        const deployResult = await deployPosition({
+          pool_address: act.pool,
+          amount_x: tokenBalance.balance,
+          amount_y: 0,
+          strategy: "bid_ask",
+          bins_below: ph2.bins_below,
+          bins_above: ph2.bins_above,
+          pool_name: p.pair,
+          phase: 2,
+        });
+
+        if (deployResult?.success) {
+          // Update phase on new position
+          setPositionPhase(deployResult.position, 2, {
+            single_side: "token",
+            oor_timeout_minutes: ph2.oor_timeout_minutes,
+          });
+          log(
+            "cron",
+            `Phase flip SUCCESS: ${p.pair} → Phase 2 position ${deployResult.position}`,
+          );
+          mgmtReport =
+            (mgmtReport || "") +
+            `\n🔄 **${p.pair}** Phase 1→2 flip complete. New position: ${deployResult.position}`;
+        } else {
+          log(
+            "cron_warn",
+            `Phase flip: Phase 2 deploy failed for ${p.pair}: ${deployResult?.error}`,
+          );
+        }
+      } catch (e) {
+        log("cron_error", `Phase flip error for ${p.pair}: ${e.message}`);
+      }
+    }
+
+    // Remove phase flip positions from the LLM action list (already handled)
+    const llmActionPositions = actionPositions.filter(
+      (p) => actionMap.get(p.position)?.action !== "PHASE_FLIP",
+    );
+
+    if (llmActionPositions.length > 0) {
+      log(
+        "cron",
+        `Management: ${llmActionPositions.length} action(s) needed — invoking LLM [model: ${config.llm.managementModel}]`,
       );
 
-      const actionBlocks = actionPositions
+      const actionBlocks = llmActionPositions
         .map((p) => {
           const act = actionMap.get(p.position);
+          const tracked = getTrackedPosition(p.position);
+          const stratTag = tracked?.strategy_id
+            ? ` [${tracked.strategy_id} P${tracked.phase ?? 1}]`
+            : "";
           return [
-            `POSITION: ${p.pair} (${p.position})`,
+            `POSITION: ${p.pair}${stratTag} (${p.position})`,
             `  pool: ${p.pool}`,
             `  action: ${act.action}${act.rule && act.rule !== "exit" ? ` — Rule ${act.rule}: ${act.reason}` : ""}${act.rule === "exit" ? ` — ⚡ Trailing TP: ${act.reason}` : ""}`,
             `  pnl_pct: ${p.pnl_pct}% | unclaimed_fees: ${cur}${p.unclaimed_fees_usd} | value: ${cur}${p.total_value_usd} | fee_per_tvl_24h: ${p.fee_per_tvl_24h ?? "?"}%`,
             `  bins: lower=${p.lower_bin} upper=${p.upper_bin} active=${p.active_bin} | oor_minutes: ${p.minutes_out_of_range ?? 0}`,
             p.instruction ? `  instruction: "${p.instruction}"` : null,
+            // Re-seed hint for tight quick flips that closed OOR-up
+            act.action === "CLOSE" &&
+            tracked?.strategy_id === "tight_bid_ask_quick_flips" &&
+            p.active_bin != null &&
+            p.upper_bin != null &&
+            p.active_bin > p.upper_bin
+              ? `  RE-SEED HINT: After closing, check pool volume. If fee_tvl_ratio > 0.1 and volume still active, immediately re-deploy same pool with bins_below=10, bins_above=0, SOL-only (tight quick flip re-seed).`
+              : null,
           ]
             .filter(Boolean)
             .join("\n");
@@ -363,7 +532,7 @@ export async function runManagementCycle({ silent = false } = {}) {
 
       const { content } = await agentLoop(
         `
-MANAGEMENT ACTION REQUIRED — ${actionPositions.length} position(s)
+MANAGEMENT ACTION REQUIRED — ${llmActionPositions.length} position(s)
 
 ${actionBlocks}
 
@@ -372,6 +541,7 @@ RULES:
 - CLAIM: call claim_fees with position address
 - INSTRUCTION: evaluate the instruction condition. If met → close_position. If not → HOLD, do nothing.
 - ⚡ exit alerts: close immediately, no exceptions
+- RE-SEED HINT: if shown, after closing call get_top_candidates or get_pool_detail on the same pool — if still active re-deploy immediately (tight quick flip strategy)
 
 Execute the required actions. Do NOT re-evaluate CLOSE/CLAIM — rules already applied. Just execute.
 After executing, write a brief one-line result per position.
