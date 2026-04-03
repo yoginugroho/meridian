@@ -956,13 +956,15 @@ The strategy will be available for selection before future deployments.`,
 The active strategy's lp_strategy shape, bins_below, bins_above, deposit type, and exit rules will be applied to the next deploy.
 
 When to switch strategies:
-- High volatility (>3) + strong narrative → consider single_sided_reseed or multi_layer
-- Medium volatility (1.5–3) + directional view → custom_ratio_spot
-- Low volatility / stable pool → fee_compounding or spot_wide
-- Any winning position at 10%+ → partial_harvest
-- Automated/cron with no strong view → spot_wide (safest)
+- Token near ATH, no active monitoring → afk_passive_bid_ask (set-and-forget VPVR play)
+- Token -10% to -30% from ATH, moderate vol, active monitoring → retrace_bid_ask_flip (tight SOL → token flip)
+- Token -20% to -40% from ATH, sleeping/working → classic_overnight_bid_ask (wide SOL, sleep play)
+- Token -40% from ATH, high vol, high conviction → tight_wide_token_recovery (tight SOL → wide token recovery)
+- Token -60%+ from ATH, strong narrative still alive → token_sided_deep_dump (token-only wide upside)
+- High vol, hyper-active session, live monitoring → tight_bid_ask_quick_flips (very tight, multiple re-seeds)
 
-Call list_strategies first to see available options and their performance track record.`,
+Call list_strategies first to see available options and their performance track record.
+Call recommend_strategy with pool characteristics for a scored recommendation.`,
       parameters: {
         type: "object",
         properties: {
@@ -1017,6 +1019,16 @@ Returns the recommended strategy id, name, and reason — then call set_active_s
             type: "boolean",
             description:
               "True for cron-driven deployments (prefer low-maintenance strategies). Default true.",
+          },
+          price_vs_ath_pct: {
+            type: "number",
+            description:
+              "How far below ATH the token currently is, as a negative percentage. E.g. -35 means price is 35% below ATH. Use price_vs_ath from get_top_candidates output. Null if unknown.",
+          },
+          monitoring_available: {
+            type: "boolean",
+            description:
+              "True if a human is actively monitoring right now and can manage fast exits. False (default) for unattended cron-only operation.",
           },
         },
       },

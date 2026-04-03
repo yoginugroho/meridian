@@ -23,7 +23,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STRATEGY_FILE = path.join(__dirname, "strategy-library.json");
 
 // Bump this whenever DEFAULT_STRATEGIES content changes — triggers auto-update of built-ins
-const BUILTIN_VERSION = 3;
+const BUILTIN_VERSION = 4;
 
 // ─── Persistence ────────────────────────────────────────────────
 
@@ -44,206 +44,219 @@ function save(data) {
 // ─── Default Strategies ─────────────────────────────────────────
 
 const DEFAULT_STRATEGIES = {
-  spot_wide: {
-    id: "spot_wide",
-    name: "Spot Wide — Safe Automation",
+  classic_overnight_bid_ask: {
+    id: "classic_overnight_bid_ask",
+    name: "Classic / Overnight Bid-Ask",
     author: "meridian",
-    lp_strategy: "spot",
-    risk_level: "low",
+    lp_strategy: "bid_ask",
+    risk_level: "medium",
     token_criteria: {
+      min_mcap: 500_000,
+      max_mcap: 2_000_000,
+      min_age_hours: 48,
+      min_volume_5m: 100_000,
       notes:
-        "Any token with consistent volume. Ideal for pools where price action is moderate and organic score is high.",
+        "Post-dip runners (-20–40% from local ATH). mcap 500k–2M+, age >2 days, organic volume (GMGN/Jupiter 5-min >100k steady). Strong narrative/KOL interest, clean chart/holders. Dynamic-fee pool with decent (not oversized) TVL. Do NOT chase — wait for confirmed dip/pain and structure.",
     },
     entry: {
-      condition: "Deploy dual-sided with spot shape across a wide bin range",
-      single_side: null,
+      condition:
+        "Enter after confirmed dip with structure showing rebound bias",
+      single_side: "sol",
       notes:
-        "Equal liquidity distribution across 50–69 bins. Bot-friendly: stays in range longer, earns steady fees with minimal rebalancing.",
+        "Single-sided SOL only (amount_y, amount_x=0). Directional rebound bias. Wait for -20–40% dip from local ATH before deploying. Do not enter while price is still falling — wait for structure confirmation.",
     },
     range: {
       type: "wide",
-      bins_below: 52,
-      bins_above: 17,
-      total_bins: 69,
+      bins_below: 50,
+      bins_above: 0,
+      total_bins: 50,
       notes:
-        "Wide range reduces OOR risk. bins_below > bins_above for slight bullish lean. Adjust ratio via custom_ratio_spot if stronger directional view.",
+        "Wide ~45–80+ bins total. Cover -40% to -50% below entry price. bins_above=0 (SOL-only, no token side). Minimal or zero bins above — all range is below for DCA-in on further dips.",
     },
     exit: {
-      take_profit_pct: null,
+      take_profit_pct: 5,
       notes:
-        "Let trailing TP or OOR timeout handle exit. No manual TP needed — wide range means fees compound well over time.",
+        "TP 3–10%+ when price rebounds and sweeps range + fees collected. Close early on no-recovery signal (volume dying, narrative breaking). OOR handling: reposition or cut if narrative breaks. No auto re-seed. Hold overnight/multi-hour — designed for sleep plays.",
     },
     best_for:
-      "Automated bots, low-monitoring setups, tokens with moderate volatility and consistent volume",
+      "Overnight/multi-hour holds while you sleep or work. Fee accumulation + directional recovery on dipped runners. Great for beginners building edge.",
   },
 
-  custom_ratio_spot: {
-    id: "custom_ratio_spot",
-    name: "Custom Ratio Spot",
+  retrace_bid_ask_flip: {
+    id: "retrace_bid_ask_flip",
+    name: "Retrace Bid-Ask Flip",
     author: "meridian",
-    lp_strategy: "spot",
+    lp_strategy: "bid_ask",
     risk_level: "medium",
     token_criteria: {
-      notes: "Any token. Ratio expresses directional bias.",
+      min_volume_5m: 200_000,
+      min_tvl: 100_000,
+      max_tvl: 150_000,
+      notes:
+        "Strong runner back toward ATH after a nice dip. Volume 200–500k+/5min on GMGN. Dynamic fee > base fee (ideally spiking). TVL 100–150k. Solid news/narrative driving the move. R/R approximately 6:9.",
     },
     entry: {
-      condition: "Directional view on token",
-      single_side: null,
+      condition:
+        "New ATH candle or strong retrace — price corrects then expected to pump back",
+      single_side: "sol",
       notes:
-        "75% token = bullish (sell on pump out of range). 75% SOL = bearish/DCA-in (buy on dip). Set bins_below:bins_above proportional to token:SOL ratio.",
+        "Phase 1: Single-sided SOL only on tight bid-ask below ATH. Deploy on new ATH candle or when strong retrace confirmed. Phase 2: Once SOL is mostly converted to tokens (position goes OOR downward), WITHDRAW (do not close) and flip to single-sided token bid-ask at same range. Fast hands required.",
     },
     range: {
-      type: "custom",
-      bins_below: 52,
-      bins_above: 17,
-      total_bins: 69,
+      type: "tight",
+      bins_below: 15,
+      bins_above: 0,
+      total_bins: 15,
       notes:
-        "bins_below:bins_above ratio matches token:SOL ratio. E.g., 75% token → ~52 bins below, ~17 bins above. Adjust per conviction.",
+        "Tight -20% to -25% from ATH, typically 10–20 bins depending on volatility. bins_above=0 for SOL-only phase. Phase 2 flip uses same range with token-only.",
     },
     exit: {
-      take_profit_pct: 10,
+      take_profit_pct: 15,
       notes:
-        "Close when OOR or TP hit. Re-deploy with updated ratio based on new momentum signals.",
+        "Phase 1: withdraw (NOT close) once SOL is mostly converted to tokens. Phase 2: flip to single-sided token bid-ask at same range. TP 15%+ from dip or when price returns to ATH/lower high. Exit on OOR if still bullish with conviction. Re-seed only on same token if momentum continues. High-frequency compounding via multiple cycles.",
     },
-    best_for: "Expressing directional bias while earning fees both ways",
+    best_for:
+      "Active momentum runners with clear retrace → pump pattern. Beats pure spot via fees + IL profit. High frequency compounding.",
   },
 
-  single_sided_reseed: {
-    id: "single_sided_reseed",
-    name: "Single-Sided Bid-Ask + Re-seed",
+  tight_bid_ask_quick_flips: {
+    id: "tight_bid_ask_quick_flips",
+    name: "Tight Bid-Ask Quick Flips",
+    author: "meridian",
+    lp_strategy: "bid_ask",
+    risk_level: "high",
+    token_criteria: {
+      min_volume_5m: 100_000,
+      notes:
+        "High-volume live runners (100k–400k+/5min). Good narrative. Post-dump retrace or bounce structure visible on chart. Dynamic-fee pools only — need volatility to earn. Active monitoring required at all times.",
+    },
+    entry: {
+      condition:
+        "On volatility/dump into range — short-term bounce bias confirmed",
+      single_side: "sol",
+      notes:
+        "Single-sided SOL only (amount_y, amount_x=0). Enter on volatility spike or dump into your range. Directional short-term bounce bias. 5–20 minute hold target. Multiple positions per session on same token are normal.",
+    },
+    range: {
+      type: "tight",
+      bins_below: 10,
+      bins_above: 0,
+      total_bins: 10,
+      notes:
+        "Very tight -7% to -15% below entry, ~10 bins max. bins_above=0. Tight range maximises fee density and conversion speed on small bounces.",
+    },
+    exit: {
+      take_profit_pct: 5,
+      notes:
+        "TP when price rebounds and position starts going OOR upward (often 5–20 min holds). Quick close + re-seed same token if still pumping. Cut FAST on dead volume — do not hold dead positions. Multiple re-seeds per session on same token if momentum holds.",
+    },
+    best_for:
+      "Hyper-active degen flips on hot new/high-volume tokens. Capture initial volatility + fees before TVL thickens. Multiple positions per session.",
+  },
+
+  tight_wide_token_recovery: {
+    id: "tight_wide_token_recovery",
+    name: "Tight → Wide Token-Side Recovery",
+    author: "meridian",
+    lp_strategy: "bid_ask",
+    risk_level: "medium",
+    token_criteria: {
+      notes:
+        "Strong runner with genuine narrative that has already dumped ~40% from ATH. Huge volume still present. TVL not yet crowded. High conviction that token will recover. Example: anime-sol 43% gain case.",
+    },
+    entry: {
+      condition:
+        "Phase 1 tight SOL bid-ask on dump; Phase 2 wide token-only after conversion",
+      single_side: "sol",
+      notes:
+        "Phase 1: Deploy single-sided SOL on tight bid-ask (-7% to -15%) as price dumps. Wait for full SOL→token conversion. Phase 2: Close Phase 1 after conversion. Re-deploy token-only bid-ask with wide UPSIDE range (100–300% above entry) for recovery play. Strong directional recovery bias required for Phase 2.",
+    },
+    range: {
+      type: "tight",
+      bins_below: 10,
+      bins_above: 0,
+      total_bins: 10,
+      notes:
+        "Phase 1: tight bins_below=10, bins_above=0 (SOL-only, -7% to -15%). Phase 2 (token-only recovery): bins_below=0, bins_above=69 (wide upside 100–300%). Set Phase 2 range wide enough to capture full recovery sweep.",
+    },
+    exit: {
+      take_profit_pct: 20,
+      notes:
+        "Phase 1: close after full SOL→token conversion (not withdraw — full close before Phase 2 deploy). Phase 2: hold for recovery sweep + fees. TP on strong bounce or narrative confirmation. OOR upward in Phase 2 = profit — close and take it. Reposition wider if conviction still high on OOR downside. No re-seed if conviction gone.",
+    },
+    best_for:
+      "High-conviction narrative tokens expecting bounce after ~40% dump. Efficient accumulation on way down + DCA recovery on way up. Avoids crowded wide SOL ranges.",
+  },
+
+  afk_passive_bid_ask: {
+    id: "afk_passive_bid_ask",
+    name: "AFK / Passive Bid-Ask",
+    author: "meridian",
+    lp_strategy: "bid_ask",
+    risk_level: "low",
+    token_criteria: {
+      min_volume_5m: 30_000,
+      min_tvl: 60_000,
+      max_tvl: 150_000,
+      notes:
+        "Steady price action at or near ATH. Minimum 30–50k vol/5min with spikes to 80–100k+. TVL 60–150k. Potential narrative but no immediate price chase needed. Use VPVR to identify fair-price/high-volume zone for range placement. Beginner-friendly.",
+    },
+    entry: {
+      condition:
+        "Token at ATH but you don't want to chase — use VPVR fair-value zone",
+      single_side: "sol",
+      notes:
+        "Single-sided SOL only (amount_y, amount_x=0). Enter after token hits ATH but do NOT chase the top. Use VPVR (volume profile visible range) to identify the highest-volume price bar as your range center. Capital-efficient — not full wide, concentrated around fair value.",
+    },
+    range: {
+      type: "vpvr_concentrated",
+      bins_below: 20,
+      bins_above: 0,
+      total_bins: 20,
+      notes:
+        "Concentrated around VPVR high-volume bar. Max price = current price - some %, min price = last visible VPVR support bar. ~20 bins (not full wide). bins_above=0. If price never dumps into range, position earns nothing but loses nothing — maximum capital efficiency.",
+    },
+    exit: {
+      take_profit_pct: 7,
+      notes:
+        "TP 5–10%+ when price dumps into range then rebounds back out. OOR handling: leave it — if it never touches your range you lose nothing (max efficiency). Re-seed only on a fresh new setup with updated VPVR analysis. Set and forget — designed for busy people.",
+    },
+    best_for:
+      "Sleep/go-away plays, off-chart passive fee farming. Perfect for busy people or lower time commitment. Near-zero downside if range never hit.",
+  },
+
+  token_sided_deep_dump: {
+    id: "token_sided_deep_dump",
+    name: "Token-Sided on Deep Dumps",
     author: "meridian",
     lp_strategy: "bid_ask",
     risk_level: "high",
     token_criteria: {
       notes:
-        "Volatile tokens with strong narrative. Must have active volume. HIGH RISK — only use on tokens with strong conviction.",
+        "Deep bleed — 60–80%+ from ATH — but strong ongoing narrative and conviction. Volume still present (not dead). You must already hold or be willing to buy the token. Only deploy when you have a genuine edge on long-term rebound. Do NOT use on rugs or dead narratives.",
     },
     entry: {
       condition:
-        "Deploy token-only (amount_x only, amount_y=0) bid-ask, bins below active bin only",
+        "Buy token first, then deploy token-sided — strong directional recovery bias",
       single_side: "token",
       notes:
-        "As price drops through bins, token sold for SOL. Bid-ask concentrates at bottom edge. No SOL required at entry.",
+        "Token-only deploy (amount_x only, amount_y=0). Buy your token position first, then deploy it into a wide upside bid-ask. All tokens placed in bins ABOVE current price — as price recovers upward through bins, tokens sell for SOL. Directional long bias required. High conviction plays only.",
     },
     range: {
-      type: "single_sided_below",
-      bins_below: 69,
-      bins_above: 0,
+      type: "wide_upside",
+      bins_below: 0,
+      bins_above: 69,
       total_bins: 69,
-      notes: "All bins below active bin. bins_above=0. Token-only deploy.",
+      notes:
+        "Wide upside — bins_below=0, bins_above=69 (100%+ recovery range). All bins above current price. Tokens gradually sell as price pumps through each bin, capturing fees and locking in SOL on the way up.",
     },
     exit: {
       take_profit_pct: null,
       notes:
-        "When OOR downside: close_position(skip_swap=true) → redeploy token-only bid-ask at new lower price. Do NOT swap to SOL between re-seeds. Full close only when token dead or after N re-seeds with declining performance.",
+        "Hold until recovery pump or narrative fully breaks. TP on strong pump when position goes OOR upward (price above all your bins) — close and take profit. If OOR downward (price keeps falling past your range bottom) = cut loss, narrative broke. No re-seed if conviction gone. Do not average down infinitely.",
     },
     best_for:
-      "Riding volatile tokens down without cutting losses. DCA out via LP.",
-  },
-
-  fee_compounding: {
-    id: "fee_compounding",
-    name: "Fee Compounding",
-    author: "meridian",
-    lp_strategy: "spot",
-    risk_level: "low",
-    token_criteria: {
-      notes:
-        "Stable volume pools with consistent fee generation. Look for fee_per_tvl_24h > 7%.",
-    },
-    entry: {
-      condition: "Deploy with spot shape on a high-volume stable pool",
-      single_side: null,
-      notes:
-        "Strategy is about management cadence, not entry shape. Wide spot range preferred so position stays in range while fees accumulate.",
-    },
-    range: {
-      type: "wide",
-      bins_below: 52,
-      bins_above: 17,
-      total_bins: 69,
-      notes:
-        "Standard wide range. Staying in range is critical — fees can only be compounded while active.",
-    },
-    exit: {
-      take_profit_pct: null,
-      notes:
-        "When unclaimed fees > $5 AND in range: claim_fees → add_liquidity back into same position. Normal close rules otherwise (OOR timeout, stop loss).",
-    },
-    best_for: "Maximizing yield on stable, range-bound pools via compounding",
-  },
-
-  multi_layer: {
-    id: "multi_layer",
-    name: "Multi-Layer Composite",
-    author: "meridian",
-    lp_strategy: "mixed",
-    risk_level: "medium",
-    token_criteria: {
-      notes:
-        "High volume pools. Best when you want custom fee capture — heavy at edges AND center simultaneously.",
-    },
-    entry: {
-      condition:
-        "Create ONE position, then layer additional shapes onto it with add-liquidity",
-      single_side: null,
-      notes:
-        "Step 1: deploy (creates position with first shape). Step 2+: add-liquidity to same position with different shapes. All layers share the same bin range — distribution curves stack on top of each other.",
-      example_patterns: {
-        smooth_edge:
-          "Deploy Bid-Ask (edges) → add-liquidity Spot (fills the middle gap). 2 layers, 1 position.",
-        full_composite:
-          "Deploy Bid-Ask (edges) → add-liquidity Spot (middle) → add-liquidity Curve (center boost). 3 layers, 1 position.",
-        edge_heavy:
-          "Deploy Bid-Ask → add-liquidity Bid-Ask again (double edge weight). 2 layers, 1 position.",
-      },
-    },
-    range: {
-      type: "custom",
-      bins_below: 52,
-      bins_above: 17,
-      total_bins: 69,
-      notes:
-        "All layers share the position's bin range (set at deploy). Choose range wide enough for the widest layer needed.",
-    },
-    exit: {
-      take_profit_pct: null,
-      notes:
-        "Single position — one close, one claim. The composite shape means fees earned reflect ALL layers combined.",
-    },
-    best_for:
-      "Creating custom liquidity distributions by stacking shapes in one position. Single position to manage.",
-  },
-
-  partial_harvest: {
-    id: "partial_harvest",
-    name: "Partial Harvest",
-    author: "meridian",
-    lp_strategy: "spot",
-    risk_level: "low",
-    token_criteria: {
-      notes:
-        "High fee pools where taking profit incrementally is preferred. Apply to any winning position at 10%+ return.",
-    },
-    entry: {
-      condition: "Deploy normally with spot shape",
-      single_side: null,
-      notes:
-        "Strategy is about progressive profit-taking, not entry shape. Use on positions already performing well.",
-    },
-    range: {
-      type: "wide",
-      bins_below: 52,
-      bins_above: 17,
-      total_bins: 69,
-      notes: "Standard wide range.",
-    },
-    exit: {
-      take_profit_pct: 10,
-      notes:
-        "When total return >= 10% of deployed capital: withdraw_liquidity(bps=5000) to take 50% off table. Remaining 50% keeps running. Repeat at each subsequent 10% threshold.",
-    },
-    best_for: "Locking in profits without fully exiting winning positions",
+      "High-conviction 'I believe in this token' recovery plays. Use when you have genuine edge on long-term rebound after 60–80% bleed.",
   },
 };
 
@@ -282,8 +295,20 @@ function ensureDefaultStrategies() {
     changed = true;
   }
 
+  // Remove old built-in strategies that are no longer in DEFAULT_STRATEGIES
+  if (needsUpdate) {
+    for (const id of Object.keys(db.strategies)) {
+      if (db.strategies[id].author === "meridian" && !DEFAULT_STRATEGIES[id]) {
+        delete db.strategies[id];
+        changed = true;
+        log("strategy", `Removed stale built-in strategy: ${id}`);
+      }
+    }
+  }
+
   if (changed) {
-    if (!db.active || !db.strategies[db.active]) db.active = "spot_wide";
+    if (!db.active || !db.strategies[db.active])
+      db.active = "classic_overnight_bid_ask";
     save(db);
     log("strategy", `Strategy library bootstrapped (v${BUILTIN_VERSION})`);
   }
@@ -355,6 +380,8 @@ export function recommendStrategy({
   fee_tvl_ratio = 0.05,
   bin_step = 100,
   is_automated = true,
+  price_vs_ath_pct = null, // e.g. -35 means price is 35% below ATH
+  monitoring_available = false, // true if active monitoring is possible right now
 } = {}) {
   const db = load();
 
@@ -362,40 +389,72 @@ export function recommendStrategy({
     let score = 0;
     const risk = s.risk_level ?? "medium";
 
-    // Automation preference — low-risk strategies favored for cron deployments
-    if (is_automated) {
+    // Automation / monitoring preference
+    if (is_automated && !monitoring_available) {
+      // Cron-only, no active monitoring: prefer low-risk set-and-forget plays
       if (risk === "low") score += 30;
       else if (risk === "medium") score += 10;
-      else score -= 20; // penalise high-risk for automated use
+      else score -= 25; // high-risk strategies need active monitoring
+    } else if (monitoring_available) {
+      // Active monitoring available: all strategies eligible, boost active ones
+      if (s.id === "tight_bid_ask_quick_flips") score += 15;
+      if (s.id === "retrace_bid_ask_flip") score += 10;
+    }
+
+    // Price-vs-ATH fit — most important signal for bid_ask strategies
+    if (price_vs_ath_pct != null) {
+      const dip = Math.abs(price_vs_ath_pct); // positive = how far below ATH
+
+      if (dip >= 60) {
+        // Deep bleed: token-sided recovery or overnight overnight wide
+        if (s.id === "token_sided_deep_dump") score += 35;
+        if (s.id === "classic_overnight_bid_ask") score += 15;
+      } else if (dip >= 30) {
+        // Significant dip: classic overnight or tight→wide recovery
+        if (s.id === "classic_overnight_bid_ask") score += 30;
+        if (s.id === "tight_wide_token_recovery") score += 20;
+      } else if (dip >= 10) {
+        // Moderate dip / retrace: retrace flip or tight flips
+        if (s.id === "retrace_bid_ask_flip") score += 30;
+        if (s.id === "tight_bid_ask_quick_flips") score += 20;
+      } else if (dip <= 5) {
+        // Near ATH: AFK passive or retrace flip
+        if (s.id === "afk_passive_bid_ask") score += 35;
+        if (s.id === "retrace_bid_ask_flip") score += 15;
+      }
     }
 
     // Volatility fit
     if (volatility <= 1.5) {
-      // Calm market: fee compounding and spot wide shine
-      if (s.id === "fee_compounding") score += 25;
-      if (s.id === "spot_wide") score += 20;
+      // Calm/low vol: AFK passive or overnight wide
+      if (s.id === "afk_passive_bid_ask") score += 20;
+      if (s.id === "classic_overnight_bid_ask") score += 15;
     } else if (volatility <= 3) {
-      // Moderate: custom ratio spot or spot wide
-      if (s.id === "custom_ratio_spot") score += 25;
-      if (s.id === "spot_wide") score += 15;
-      if (s.id === "multi_layer") score += 10;
+      // Moderate vol: classic overnight, retrace flip
+      if (s.id === "classic_overnight_bid_ask") score += 20;
+      if (s.id === "retrace_bid_ask_flip") score += 15;
+      if (s.id === "tight_wide_token_recovery") score += 10;
     } else {
-      // High: bid-ask captures edge volatility; reseed for strong narratives
-      if (s.id === "single_sided_reseed") score += 15;
-      if (s.id === "multi_layer") score += 20;
-      if (s.id === "partial_harvest") score += 10;
+      // High vol: tight flips capture fee spikes; token recovery if deep dump
+      if (s.id === "tight_bid_ask_quick_flips") score += 25;
+      if (s.id === "retrace_bid_ask_flip") score += 15;
+      if (s.id === "token_sided_deep_dump") score += 10;
     }
 
-    // Fee/TVL fit
-    if (fee_tvl_ratio >= 0.15) {
-      // High-fee pool: compounding adds most value
-      if (s.id === "fee_compounding") score += 20;
-      if (s.id === "partial_harvest") score += 15;
+    // Fee/TVL fit — higher fee = more active pool, better for tight/quick strategies
+    if (fee_tvl_ratio >= 0.2) {
+      // Very high fee: tight flips and retrace flip benefit most
+      if (s.id === "tight_bid_ask_quick_flips") score += 20;
+      if (s.id === "retrace_bid_ask_flip") score += 15;
+    } else if (fee_tvl_ratio >= 0.1) {
+      if (s.id === "classic_overnight_bid_ask") score += 10;
+      if (s.id === "retrace_bid_ask_flip") score += 10;
     } else if (fee_tvl_ratio >= 0.05) {
-      if (s.id === "spot_wide") score += 10;
+      if (s.id === "afk_passive_bid_ask") score += 10;
+      if (s.id === "classic_overnight_bid_ask") score += 5;
     }
 
-    // Boost strategies with a proven track record
+    // Boost strategies with a proven track record in current conditions
     const perf = s.performance;
     if (perf && perf.deployments >= 3) {
       const avgPnl = perf.total_pnl_pct / perf.deployments;
@@ -416,10 +475,14 @@ export function recommendStrategy({
     `volatility=${volatility.toFixed(1)}`,
     `fee_tvl=${fee_tvl_ratio.toFixed(2)}`,
     `bin_step=${bin_step}`,
+    price_vs_ath_pct != null ? `price_vs_ath=${price_vs_ath_pct}%` : null,
+    monitoring_available ? "monitoring=active" : "monitoring=cron_only",
     best.performance?.deployments > 0
       ? `track_record=(${formatPerf(best.performance)})`
       : "no prior data",
-  ].join(", ");
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   return { id: best.id, name: best.name, reason };
 }
