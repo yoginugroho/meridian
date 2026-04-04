@@ -361,6 +361,8 @@ const DEFAULT_STRATEGIES = {
       trailing_trigger_pct: 10,
       trailing_drop_pct: 3,
       oor_timeout_minutes: 60,
+      min_fee_per_tvl_24h: 3, // lower threshold — consolidation is normal in multi-hour holds
+      min_age_for_yield_check_min: 120, // don't close for low yield before 2 hours
       notes:
         "Hold 30 minutes to 6 hours — mobile/class friendly. Trailing TP activates at 10% PnL and closes on 3% pullback from peak (comfortable TP of 10–30%). Manage OOR by closing if narrative fading, or re-seeding at new active bin if hype continues. No stress management required — designed for people who cannot watch the screen.",
     },

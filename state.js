@@ -228,6 +228,8 @@ export function setPositionStrategyMeta(
     take_profit_pct = undefined, // undefined = use global config; null = disabled; number = override
     trailing_trigger_pct = undefined, // undefined = use global; number = override
     trailing_drop_pct = undefined, // undefined = use global; number = override
+    min_fee_per_tvl_24h = undefined, // undefined = use global config; number = override
+    min_age_for_yield_check_min = undefined, // undefined = use global (60); number = override
   } = {},
 ) {
   const state = load();
@@ -243,6 +245,10 @@ export function setPositionStrategyMeta(
     pos.trailing_trigger_pct = trailing_trigger_pct;
   if (trailing_drop_pct !== undefined)
     pos.trailing_drop_pct = trailing_drop_pct;
+  if (min_fee_per_tvl_24h !== undefined)
+    pos.min_fee_per_tvl_24h = min_fee_per_tvl_24h;
+  if (min_age_for_yield_check_min !== undefined)
+    pos.min_age_for_yield_check_min = min_age_for_yield_check_min;
   save(state);
   log(
     "state",

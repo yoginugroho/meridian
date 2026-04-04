@@ -406,6 +406,9 @@ export async function executeTool(name, args) {
             take_profit_pct: activeStrategy.exit?.take_profit_pct,
             trailing_trigger_pct: activeStrategy.exit?.trailing_trigger_pct,
             trailing_drop_pct: activeStrategy.exit?.trailing_drop_pct,
+            min_fee_per_tvl_24h: activeStrategy.exit?.min_fee_per_tvl_24h,
+            min_age_for_yield_check_min:
+              activeStrategy.exit?.min_age_for_yield_check_min,
           });
         }
       } else if (name === "close_position") {

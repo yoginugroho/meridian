@@ -334,11 +334,15 @@ export async function runManagementCycle({ silent = false } = {}) {
       }
       // Rule 5: fee yield too low — only applies when position is IN RANGE
       // OOR positions earn zero fees by design; Rule 4 handles their exit separately
+      // Per-position overrides: strategy can set min_fee_per_tvl_24h and min_age_for_yield_check_min
+      const effectiveMinFee =
+        tracked?.min_fee_per_tvl_24h ?? config.management.minFeePerTvl24h;
+      const effectiveMinAge = tracked?.min_age_for_yield_check_min ?? 60;
       if (
         p.in_range &&
         p.fee_per_tvl_24h != null &&
-        p.fee_per_tvl_24h < config.management.minFeePerTvl24h &&
-        (p.age_minutes ?? 0) >= 60
+        p.fee_per_tvl_24h < effectiveMinFee &&
+        (p.age_minutes ?? 0) >= effectiveMinAge
       ) {
         actionMap.set(p.position, {
           action: "CLOSE",
@@ -553,6 +557,19 @@ export async function runManagementCycle({ silent = false } = {}) {
             p.active_bin > p.upper_bin
               ? `  RE-SEED HINT: After closing, check pool volume. If fee_tvl_ratio > 0.1 and volume still active, immediately re-deploy same pool with bins_below=10, bins_above=0, SOL-only (tight quick flip re-seed).`
               : null,
+            // Re-seed hint for spot wave enjoyer that closed OOR-up (wave completed, next wave may form)
+            act.action === "CLOSE" &&
+            tracked?.strategy_id === "spot_wave_enjoyer" &&
+            p.active_bin != null &&
+            p.upper_bin != null &&
+            p.active_bin > p.upper_bin
+              ? `  RE-SEED HINT (wave enjoyer): Wave captured. Check if volume is still ≥100K/5min and a new support level has formed below current price. If yes → re-deploy same pool with bins_below=25, bins_above=0, SOL-only at new support. Do NOT re-seed if volume died or no clear support visible.`
+              : null,
+            // Re-seed hint for NPC default range that closed OOR or yield (hype may continue)
+            act.action === "CLOSE" &&
+            tracked?.strategy_id === "spot_npc_default_range"
+              ? `  RE-SEED HINT (NPC): Check if volume is still ≥50K/5min and narrative/hype is ongoing. If yes → re-deploy same pool with bins_below=69, bins_above=0, SOL-only at new active bin. Close and do NOT re-seed if volume has clearly died or token is dumping.`
+              : null,
           ]
             .filter(Boolean)
             .join("\n");
@@ -570,7 +587,7 @@ RULES:
 - CLAIM: call claim_fees with position address
 - INSTRUCTION: evaluate the instruction condition. If met → close_position. If not → HOLD, do nothing.
 - ⚡ exit alerts: close immediately, no exceptions
-- RE-SEED HINT: if shown, after closing call get_top_candidates or get_pool_detail on the same pool — if still active re-deploy immediately (tight quick flip strategy)
+- RE-SEED HINT: if shown, after closing call get_pool_detail on the same pool to check current fee_tvl_ratio and volume — then re-deploy if conditions still valid (strategy-specific logic in the hint)
 
 Execute the required actions. Do NOT re-evaluate CLOSE/CLAIM — rules already applied. Just execute.
 After executing, write a brief one-line result per position.
