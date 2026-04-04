@@ -292,6 +292,81 @@ const DEFAULT_STRATEGIES = {
     best_for:
       "High-conviction 'I believe in this token' recovery plays. Use when you have genuine edge on long-term rebound after 60–80% bleed.",
   },
+
+  spot_wave_enjoyer: {
+    id: "spot_wave_enjoyer",
+    name: "Spot 1–2 Wave Enjoyer (SPOT TRIFECTA)",
+    author: "voidgoesbrr",
+    lp_strategy: "spot",
+    risk_level: "high",
+    token_criteria: {
+      min_volume_5m: 100_000,
+      notes:
+        "Good narrative / legit KOL-backed tokens that are actively pumping. Requires ≥100K volume/5min AND price sitting at a clearly identifiable support level. Do NOT deploy into trending tokens without a visible support — the range must anchor to structure.",
+    },
+    entry: {
+      condition: "Price at latest support level + ≥100K volume/5min confirmed",
+      single_side: "sol",
+      notes:
+        "Single-sided SOL only (amount_y, amount_x=0). Directional bias toward 1–2 retracement waves off support. Set MinPrice% exactly at the latest support level — this is your lower bound. Deploy when volume is active and price has just touched or confirmed support. Spot shape ensures uniform distribution across the wave range.",
+    },
+    range: {
+      type: "moderate",
+      bins_below: 25,
+      bins_above: 0,
+      total_bins: 25,
+      notes:
+        "Moderate range — set lower bound (bins_below) to exactly match the latest support level as a percentage below entry price. bins_above=0 (SOL-only). Typically 20–30 bins depending on how far support is. Do NOT go wider than needed — this is a precision wave capture, not a wide safety net.",
+    },
+    exit: {
+      take_profit_pct: null,
+      trailing_trigger_pct: 5,
+      trailing_drop_pct: 2,
+      oor_timeout_minutes: 20,
+      notes:
+        "Target 1–2 waves = ~5–10% PnL. Hold 10–20 minutes. Trailing TP activates at 5% and closes on 2% pullback from peak. Exit on OOR immediately — don't wait. Re-seed if momentum continues (price made new high, volume still ≥50K/5min, fresh support formed). Do NOT hold through a failed wave.",
+    },
+    best_for:
+      "Catching short-term retracement waves in pumping coins during moderately dry or steady markets. Part of the SPOT TRIFECTA — precision wave entries for active sessions.",
+  },
+
+  spot_npc_default_range: {
+    id: "spot_npc_default_range",
+    name: "Spot NPC / Default Range 70-bin (SPOT TRIFECTA)",
+    author: "voidgoesbrr",
+    lp_strategy: "spot",
+    risk_level: "medium",
+    token_criteria: {
+      min_volume_5m: 50_000,
+      notes:
+        "Good narrative token after initial hype has started (not at the very beginning). Entry trigger: volume spike AND new ATH being made, with ongoing minimum 50K volume/5min sustained. Avoid deploying before the first ATH confirmation — wait for the breakout then enter.",
+    },
+    entry: {
+      condition:
+        "Volume spike + new ATH candle confirmed + ongoing ≥50K volume/5min",
+      single_side: "sol",
+      notes:
+        "Single-sided SOL only (amount_y, amount_x=0). Entry after the first significant volume spike and ATH confirmation — you're riding the continued hype, not the initial pump. Spot shape with default 70-bin range at ~80 bin step gives wide coverage for multi-hour holds. Mobile-friendly: once deployed, minimal active management needed.",
+    },
+    range: {
+      type: "wide",
+      bins_below: 69,
+      bins_above: 0,
+      total_bins: 69,
+      notes:
+        "Default ~70 bins at ~80 bin step. All bins below active bin (SOL-only). Wide coverage allows price to oscillate within a broad range without going OOR. The width is intentional — this is a multi-hour chill position, not a precision entry. bins_above=0.",
+    },
+    exit: {
+      take_profit_pct: null,
+      trailing_trigger_pct: 10,
+      trailing_drop_pct: 3,
+      oor_timeout_minutes: 60,
+      notes:
+        "Hold 30 minutes to 6 hours — mobile/class friendly. Trailing TP activates at 10% PnL and closes on 3% pullback from peak (comfortable TP of 10–30%). Manage OOR by closing if narrative fading, or re-seeding at new active bin if hype continues. No stress management required — designed for people who cannot watch the screen.",
+    },
+    best_for:
+      "Chill multi-hour positions after initial hype confirmation. Easy to manage on phone or in class. Part of the SPOT TRIFECTA — the relaxed, wider coverage counterpart to Wave Enjoyer.",
+  },
 };
 
 // ─── Bootstrap ──────────────────────────────────────────────────
@@ -433,6 +508,8 @@ export function recommendStrategy({
       // Active monitoring available: all strategies eligible, boost active ones
       if (s.id === "tight_bid_ask_quick_flips") score += 15;
       if (s.id === "retrace_bid_ask_flip") score += 10;
+      if (s.id === "spot_wave_enjoyer") score += 20; // precision wave entries need active monitoring
+      if (s.id === "spot_npc_default_range") score += 10; // works attended or unattended
     }
 
     // Price-vs-ATH fit — most important signal for bid_ask strategies
@@ -440,7 +517,7 @@ export function recommendStrategy({
       const dip = Math.abs(price_vs_ath_pct); // positive = how far below ATH
 
       if (dip >= 60) {
-        // Deep bleed: token-sided recovery or overnight overnight wide
+        // Deep bleed: token-sided recovery or overnight wide
         if (s.id === "token_sided_deep_dump") score += 35;
         if (s.id === "classic_overnight_bid_ask") score += 15;
       } else if (dip >= 30) {
@@ -448,12 +525,14 @@ export function recommendStrategy({
         if (s.id === "classic_overnight_bid_ask") score += 30;
         if (s.id === "tight_wide_token_recovery") score += 20;
       } else if (dip >= 10) {
-        // Moderate dip / retrace: retrace flip or tight flips
+        // Moderate dip / retrace: retrace flip, tight flips, or wave enjoyer
         if (s.id === "retrace_bid_ask_flip") score += 30;
         if (s.id === "tight_bid_ask_quick_flips") score += 20;
+        if (s.id === "spot_wave_enjoyer") score += 20; // wave enjoyer excels at moderate dips to support
       } else if (dip <= 5) {
-        // Near ATH: AFK passive or retrace flip
-        if (s.id === "afk_passive_bid_ask") score += 35;
+        // Near ATH / just broken out: NPC default range or AFK passive
+        if (s.id === "spot_npc_default_range") score += 35; // ATH breakout with volume = NPC entry signal
+        if (s.id === "afk_passive_bid_ask") score += 20;
         if (s.id === "retrace_bid_ask_flip") score += 15;
       }
     }
@@ -463,29 +542,37 @@ export function recommendStrategy({
       // Calm/low vol: AFK passive or overnight wide
       if (s.id === "afk_passive_bid_ask") score += 20;
       if (s.id === "classic_overnight_bid_ask") score += 15;
+      if (s.id === "spot_npc_default_range") score += 10; // NPC works in calm markets too
     } else if (volatility <= 3) {
-      // Moderate vol: classic overnight, retrace flip
+      // Moderate vol: classic overnight, retrace flip, wave enjoyer, NPC
       if (s.id === "classic_overnight_bid_ask") score += 20;
       if (s.id === "retrace_bid_ask_flip") score += 15;
       if (s.id === "tight_wide_token_recovery") score += 10;
+      if (s.id === "spot_wave_enjoyer") score += 20; // moderate vol = clear wave structure
+      if (s.id === "spot_npc_default_range") score += 15; // moderate vol = multi-hour hold viable
     } else {
       // High vol: tight flips capture fee spikes; token recovery if deep dump
       if (s.id === "tight_bid_ask_quick_flips") score += 25;
       if (s.id === "retrace_bid_ask_flip") score += 15;
       if (s.id === "token_sided_deep_dump") score += 10;
+      if (s.id === "spot_wave_enjoyer") score += 10; // wave enjoyer can work in high vol with good support
     }
 
     // Fee/TVL fit — higher fee = more active pool, better for tight/quick strategies
     if (fee_tvl_ratio >= 0.2) {
-      // Very high fee: tight flips and retrace flip benefit most
+      // Very high fee: tight flips and retrace flip benefit most; wave enjoyer thrives
       if (s.id === "tight_bid_ask_quick_flips") score += 20;
       if (s.id === "retrace_bid_ask_flip") score += 15;
+      if (s.id === "spot_wave_enjoyer") score += 15; // high fee = active pool = clear wave structure
     } else if (fee_tvl_ratio >= 0.1) {
       if (s.id === "classic_overnight_bid_ask") score += 10;
       if (s.id === "retrace_bid_ask_flip") score += 10;
+      if (s.id === "spot_npc_default_range") score += 10; // moderate fee = sustained hype = NPC viable
+      if (s.id === "spot_wave_enjoyer") score += 8;
     } else if (fee_tvl_ratio >= 0.05) {
       if (s.id === "afk_passive_bid_ask") score += 10;
       if (s.id === "classic_overnight_bid_ask") score += 5;
+      if (s.id === "spot_npc_default_range") score += 5;
     }
 
     // Boost strategies with a proven track record in current conditions

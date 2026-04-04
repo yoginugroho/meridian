@@ -1004,6 +1004,8 @@ The active strategy's lp_strategy shape, bins_below, bins_above, deposit type, a
 
 When to switch strategies:
 - Token near ATH, no active monitoring → afk_passive_bid_ask (set-and-forget VPVR play)
+- Token at ATH breakout + volume spike + active monitoring → spot_npc_default_range (70-bin SOL, chill multi-hour)
+- Token -10% to -20% at support + ≥100K vol/5min + active monitoring → spot_wave_enjoyer (spot SOL, 1-2 wave capture)
 - Token -10% to -30% from ATH, moderate vol, active monitoring → retrace_bid_ask_flip (tight SOL → token flip)
 - Token -20% to -40% from ATH, sleeping/working → classic_overnight_bid_ask (wide SOL, sleep play)
 - Token -40% from ATH, high vol, high conviction → tight_wide_token_recovery (tight SOL → wide token recovery)
