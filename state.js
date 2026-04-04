@@ -225,6 +225,9 @@ export function setPositionStrategyMeta(
     phase = 1,
     single_side = null,
     oor_timeout_minutes = null,
+    take_profit_pct = undefined, // undefined = use global config; null = disabled; number = override
+    trailing_trigger_pct = undefined, // undefined = use global; number = override
+    trailing_drop_pct = undefined, // undefined = use global; number = override
   } = {},
 ) {
   const state = load();
@@ -235,10 +238,15 @@ export function setPositionStrategyMeta(
   pos.single_side = single_side;
   if (oor_timeout_minutes != null)
     pos.oor_timeout_minutes = oor_timeout_minutes;
+  if (take_profit_pct !== undefined) pos.take_profit_pct = take_profit_pct;
+  if (trailing_trigger_pct !== undefined)
+    pos.trailing_trigger_pct = trailing_trigger_pct;
+  if (trailing_drop_pct !== undefined)
+    pos.trailing_drop_pct = trailing_drop_pct;
   save(state);
   log(
     "state",
-    `Strategy meta set for ${position_address}: strategy=${strategy_id} phase=${phase} single_side=${single_side} oor=${oor_timeout_minutes}m`,
+    `Strategy meta set for ${position_address}: strategy=${strategy_id} phase=${phase} single_side=${single_side} oor=${oor_timeout_minutes}m tp=${take_profit_pct} trailing=${trailing_trigger_pct}/${trailing_drop_pct}`,
   );
 }
 
@@ -329,6 +337,11 @@ export function updatePnlAndCheckExits(
   const pos = state.positions[position_address];
   if (!pos || pos.closed) return null;
 
+  // Use per-position trailing TP config if set, otherwise fall back to global config
+  const trailingTriggerPct =
+    pos.trailing_trigger_pct ?? mgmtConfig.trailingTriggerPct;
+  const trailingDropPct = pos.trailing_drop_pct ?? mgmtConfig.trailingDropPct;
+
   let changed = false;
 
   // Track peak PnL
@@ -341,7 +354,7 @@ export function updatePnlAndCheckExits(
   if (
     mgmtConfig.trailingTakeProfit &&
     !pos.trailing_active &&
-    currentPnlPct >= mgmtConfig.trailingTriggerPct
+    currentPnlPct >= trailingTriggerPct
   ) {
     pos.trailing_active = true;
     changed = true;
@@ -379,10 +392,10 @@ export function updatePnlAndCheckExits(
   // ── Trailing TP ────────────────────────────────────────────────
   if (pos.trailing_active) {
     const dropFromPeak = pos.peak_pnl_pct - currentPnlPct;
-    if (dropFromPeak >= mgmtConfig.trailingDropPct) {
+    if (dropFromPeak >= trailingDropPct) {
       return {
         action: "TRAILING_TP",
-        reason: `Trailing TP: peak ${pos.peak_pnl_pct.toFixed(2)}% → current ${currentPnlPct.toFixed(2)}% (dropped ${dropFromPeak.toFixed(2)}% >= ${mgmtConfig.trailingDropPct}%)`,
+        reason: `Trailing TP: peak ${pos.peak_pnl_pct.toFixed(2)}% → current ${currentPnlPct.toFixed(2)}% (dropped ${dropFromPeak.toFixed(2)}% >= ${trailingDropPct}%)`,
       };
     }
   }

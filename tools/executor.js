@@ -402,6 +402,10 @@ export async function executeTool(name, args) {
             single_side: activeStrategy.entry?.single_side ?? null,
             oor_timeout_minutes:
               activeStrategy.exit?.oor_timeout_minutes ?? null,
+            // Per-strategy TP and trailing overrides — undefined means "use global config"
+            take_profit_pct: activeStrategy.exit?.take_profit_pct,
+            trailing_trigger_pct: activeStrategy.exit?.trailing_trigger_pct,
+            trailing_drop_pct: activeStrategy.exit?.trailing_drop_pct,
           });
         }
       } else if (name === "close_position") {

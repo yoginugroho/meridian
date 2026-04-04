@@ -28,13 +28,14 @@ import {
   getTrackedPosition,
   setPositionInstruction,
   updatePnlAndCheckExits,
+  setPositionPhase,
+  setPositionStrategyMeta,
 } from "./state.js";
 import {
   getActiveStrategy,
   getStrategyPromptBlock,
   recordStrategyPerformance,
 } from "./strategy-library.js";
-import { setPositionPhase } from "./state.js";
 import {
   recordPositionSnapshot,
   recallForPool,
@@ -182,11 +183,15 @@ export async function runManagementCycle({ silent = false } = {}) {
         bins_above: 15,
         bins_below: 0,
         oor_timeout_minutes: 15,
+        trailing_trigger_pct: 10,
+        trailing_drop_pct: 3,
       },
       tight_wide_token_recovery: {
         bins_above: 69,
         bins_below: 0,
         oor_timeout_minutes: 30,
+        trailing_trigger_pct: 15,
+        trailing_drop_pct: 5,
       },
     };
 
@@ -215,11 +220,13 @@ export async function runManagementCycle({ silent = false } = {}) {
 
       // ── Rule 6: OOR downward — token-only position (phase 2 or token_sided_deep_dump)
       // Price dropped below lower_bin → narrative broke, cut loss immediately without waiting
+      // Requires ≥2 min confirmed OOR to avoid false positives from brief API lag
       if (
         p.active_bin != null &&
         p.lower_bin != null &&
         p.active_bin < p.lower_bin &&
         !p.in_range &&
+        (p.minutes_out_of_range ?? 0) >= 2 &&
         (tracked?.single_side === "token" || tracked?.phase === 2)
       ) {
         actionMap.set(p.position, {
@@ -281,16 +288,23 @@ export async function runManagementCycle({ silent = false } = {}) {
         });
         continue;
       }
-      // Rule 2: take profit
+      // Rule 2: take profit — use per-position threshold if set by strategy
+      // tracked.take_profit_pct === null means strategy explicitly disables hard TP (trailing handles it)
+      // tracked.take_profit_pct === undefined / no strategy_id means use global config
+      const effectiveTakeProfitPct =
+        tracked?.strategy_id != null
+          ? (tracked?.take_profit_pct ?? null) // null = strategy disabled it
+          : config.management.takeProfitFeePct; // no strategy meta = use global
       if (
         !pnlSuspect &&
+        effectiveTakeProfitPct != null &&
         p.pnl_pct != null &&
-        p.pnl_pct >= config.management.takeProfitFeePct
+        p.pnl_pct >= effectiveTakeProfitPct
       ) {
         actionMap.set(p.position, {
           action: "CLOSE",
           rule: 2,
-          reason: "take profit",
+          reason: `take profit (${effectiveTakeProfitPct}%)`,
         });
         continue;
       }
@@ -318,8 +332,10 @@ export async function runManagementCycle({ silent = false } = {}) {
         });
         continue;
       }
-      // Rule 5: fee yield too low
+      // Rule 5: fee yield too low — only applies when position is IN RANGE
+      // OOR positions earn zero fees by design; Rule 4 handles their exit separately
       if (
+        p.in_range &&
         p.fee_per_tvl_24h != null &&
         p.fee_per_tvl_24h < config.management.minFeePerTvl24h &&
         (p.age_minutes ?? 0) >= 60
@@ -415,12 +431,18 @@ export async function runManagementCycle({ silent = false } = {}) {
         `Phase flip: closing Phase 1 of ${p.pair} (${act.strategy_id}) — will redeploy token-only Phase 2`,
       );
       try {
-        // Step 1: Close Phase 1, keeping tokens in wallet (skip auto-swap)
+        // Step 1: Snapshot token balance BEFORE close (to compute exact recovered delta)
+        const { getWalletBalances } = await import("./tools/wallet.js");
+        const beforeBalances = await getWalletBalances({});
+        const beforeTokenAmt =
+          beforeBalances?.tokens?.find((t) => t.mint === p.base_mint)
+            ?.balance ?? 0;
+
+        // Step 2: Close Phase 1 — bypass executor so no auto-swap fires, tokens stay in wallet
         const { closePosition } = await import("./tools/dlmm.js");
         const closeResult = await closePosition({
           position_address: p.position,
           reason: `Phase 1 complete — flipping to Phase 2 (${act.strategy_id})`,
-          skip_swap: true,
         });
 
         if (!closeResult?.success) {
@@ -431,34 +453,35 @@ export async function runManagementCycle({ silent = false } = {}) {
           continue;
         }
 
-        // Step 2: Brief wait for RPC to settle
-        await new Promise((r) => setTimeout(r, 3000));
+        // Step 3: Wait for RPC to reflect the recovered tokens
+        await new Promise((r) => setTimeout(r, 5000));
 
-        // Step 3: Get token balance
-        const { getWalletBalances } = await import("./tools/wallet.js");
-        const balances = await getWalletBalances({});
-        const tokenBalance = balances?.tokens?.find(
-          (t) => t.mint === closeResult.base_mint,
-        );
+        // Step 4: Compute ONLY the tokens recovered from Phase 1 (delta vs pre-close balance)
+        const afterBalances = await getWalletBalances({});
+        const afterTokenAmt =
+          afterBalances?.tokens?.find((t) => t.mint === closeResult.base_mint)
+            ?.balance ?? 0;
 
-        if (!tokenBalance || tokenBalance.balance <= 0) {
+        const recoveredTokens = afterTokenAmt - beforeTokenAmt;
+
+        if (recoveredTokens <= 0) {
           log(
             "cron_warn",
-            `Phase flip: no token balance found after Phase 1 close for ${p.pair}`,
+            `Phase flip: no tokens recovered from Phase 1 close for ${p.pair} (before=${beforeTokenAmt} after=${afterTokenAmt})`,
           );
           continue;
         }
 
         log(
           "cron",
-          `Phase flip: deploying Phase 2 — ${tokenBalance.balance} ${tokenBalance.symbol ?? "tokens"} into ${act.pool} (bins_above=${ph2.bins_above})`,
+          `Phase flip: deploying Phase 2 — ${recoveredTokens} tokens into ${act.pool} (bins_above=${ph2.bins_above})`,
         );
 
-        // Step 4: Deploy Phase 2 (token-only, wide upside)
+        // Step 5: Deploy Phase 2 (token-only, wide upside)
         const { deployPosition } = await import("./tools/dlmm.js");
         const deployResult = await deployPosition({
           pool_address: act.pool,
-          amount_x: tokenBalance.balance,
+          amount_x: recoveredTokens,
           amount_y: 0,
           strategy: "bid_ask",
           bins_below: ph2.bins_below,
@@ -468,10 +491,16 @@ export async function runManagementCycle({ silent = false } = {}) {
         });
 
         if (deployResult?.success) {
-          // Update phase on new position
-          setPositionPhase(deployResult.position, 2, {
+          // Step 6: Tag Phase 2 position with full strategy metadata
+          setPositionStrategyMeta(deployResult.position, {
+            strategy_id: act.strategy_id,
+            phase: 2,
             single_side: "token",
             oor_timeout_minutes: ph2.oor_timeout_minutes,
+            // Phase 2 uses trailing TP only — no hard TP (token needs to sweep range)
+            take_profit_pct: null,
+            trailing_trigger_pct: ph2.trailing_trigger_pct ?? null,
+            trailing_drop_pct: ph2.trailing_drop_pct ?? null,
           });
           log(
             "cron",
