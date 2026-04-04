@@ -91,7 +91,9 @@ export function isEnabled() {
  */
 export async function register(url, registrationToken) {
   if (!registrationToken) {
-    throw new Error("Registration token required. Get it from the hive operator.");
+    throw new Error(
+      "Registration token required. Get it from the hive operator.",
+    );
   }
 
   const baseUrl = url.replace(/\/+$/, "");
@@ -105,7 +107,10 @@ export async function register(url, registrationToken) {
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ display_name: displayName, registration_token: registrationToken }),
+      body: JSON.stringify({
+        display_name: displayName,
+        registration_token: registrationToken,
+      }),
     },
     POST_TIMEOUT_MS,
   );
@@ -116,7 +121,11 @@ export async function register(url, registrationToken) {
   }
 
   const { agent_id, api_key } = await res.json();
-  writeConfig({ hiveMindUrl: baseUrl, hiveMindApiKey: api_key, hiveMindAgentId: agent_id });
+  writeConfig({
+    hiveMindUrl: baseUrl,
+    hiveMindApiKey: api_key,
+    hiveMindAgentId: agent_id,
+  });
   console.log("[hive]", `Registered! agent_id=${agent_id}`);
   console.log("[hive]", `API key: ${api_key}`);
   console.log("[hive]", `Save this key — it will NOT be shown again.`);
@@ -141,7 +150,10 @@ export async function syncToHive() {
     // ── Collect local data ──────────────────────────
 
     // Lessons
-    const lessonsData = readJsonFile(LESSONS_FILE) || { lessons: [], performance: [] };
+    const lessonsData = readJsonFile(LESSONS_FILE) || {
+      lessons: [],
+      performance: [],
+    };
     const lessons = lessonsData.lessons || [];
 
     // Pool deploys — flatten all pools' deploy arrays
@@ -169,6 +181,8 @@ export async function syncToHive() {
       minMcap: cfg.minMcap,
       stopLossPct: cfg.stopLossPct ?? cfg.emergencyPriceDropPct,
       takeProfitFeePct: cfg.takeProfitFeePct,
+      maxVolatility: cfg.maxVolatility ?? null,
+      maxNewWalletPct: cfg.maxNewWalletPct ?? null,
     };
 
     // Agent stats via dynamic import (avoids circular deps)
@@ -184,7 +198,10 @@ export async function syncToHive() {
 
     const payload = { lessons, deploys, thresholds, agentStats };
 
-    console.log("[hive]", `Syncing ${lessons.length} lessons, ${deploys.length} deploys...`);
+    console.log(
+      "[hive]",
+      `Syncing ${lessons.length} lessons, ${deploys.length} deploys...`,
+    );
 
     const res = await fetchWithTimeout(
       `${cfg.hiveMindUrl}/api/sync`,
@@ -206,7 +223,10 @@ export async function syncToHive() {
     }
 
     const result = await res.json();
-    console.log("[hive]", `Sync complete — ${result.lessons_upserted} lessons, ${result.deploys_upserted} deploys`);
+    console.log(
+      "[hive]",
+      `Sync complete — ${result.lessons_upserted} lessons, ${result.deploys_upserted} deploys`,
+    );
   } catch (e) {
     console.log("[hive]", `Sync error: ${e.message}`);
   }
@@ -244,9 +264,10 @@ export async function queryLessonConsensus(tags) {
     const cfg = readConfig();
     if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
 
-    const qs = Array.isArray(tags) && tags.length > 0
-      ? `?tags=${encodeURIComponent(tags.join(","))}`
-      : "";
+    const qs =
+      Array.isArray(tags) && tags.length > 0
+        ? `?tags=${encodeURIComponent(tags.join(","))}`
+        : "";
     const res = await fetchWithTimeout(
       `${cfg.hiveMindUrl}/api/consensus/lessons${qs}`,
       { headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` } },
@@ -269,7 +290,8 @@ export async function queryPatternConsensus(volatility) {
     const cfg = readConfig();
     if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
 
-    const qs = volatility != null ? `?volatility=${encodeURIComponent(volatility)}` : "";
+    const qs =
+      volatility != null ? `?volatility=${encodeURIComponent(volatility)}` : "";
     const res = await fetchWithTimeout(
       `${cfg.hiveMindUrl}/api/consensus/patterns${qs}`,
       { headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` } },
@@ -312,10 +334,9 @@ export async function getHivePulse() {
     const cfg = readConfig();
     if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
 
-    const res = await fetchWithTimeout(
-      `${cfg.hiveMindUrl}/api/pulse`,
-      { headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` } },
-    );
+    const res = await fetchWithTimeout(`${cfg.hiveMindUrl}/api/pulse`, {
+      headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` },
+    });
 
     if (!res.ok) return null;
     return await res.json();
@@ -331,7 +352,11 @@ export async function getHivePulse() {
  * @returns {Promise<string>} Formatted consensus block or empty string
  */
 export async function formatPoolConsensusForPrompt(poolAddresses) {
-  if (!isEnabled() || !Array.isArray(poolAddresses) || poolAddresses.length === 0) {
+  if (
+    !isEnabled() ||
+    !Array.isArray(poolAddresses) ||
+    poolAddresses.length === 0
+  ) {
     return "";
   }
 
@@ -351,10 +376,15 @@ export async function formatPoolConsensusForPrompt(poolAddresses) {
         poolsWithData++;
         const name = data.pool_name || addr.slice(0, 8);
         const winPct = data.weighted_win_rate ?? 0;
-        const avgPnl = data.weighted_avg_pnl != null
-          ? (data.weighted_avg_pnl >= 0 ? "+" : "") + data.weighted_avg_pnl.toFixed(1) + "%"
-          : "N/A";
-        lines.push(`[HIVE] ${name}: ${data.unique_agents} agents, ${winPct}% win, ${avgPnl} avg PnL`);
+        const avgPnl =
+          data.weighted_avg_pnl != null
+            ? (data.weighted_avg_pnl >= 0 ? "+" : "") +
+              data.weighted_avg_pnl.toFixed(1) +
+              "%"
+            : "N/A";
+        lines.push(
+          `[HIVE] ${name}: ${data.unique_agents} agents, ${winPct}% win, ${avgPnl} avg PnL`,
+        );
       }
     }
 
