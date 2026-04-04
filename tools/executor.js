@@ -201,7 +201,9 @@ const toolMap = {
       minTokenAgeHours: ["screening", "minTokenAgeHours"],
       maxTokenAgeHours: ["screening", "maxTokenAgeHours"],
       athFilterPct: ["screening", "athFilterPct"],
+      maxVolatility: ["screening", "maxVolatility"],
       minFeePerTvl24h: ["management", "minFeePerTvl24h"],
+      minAgeBeforeYieldCheck: ["management", "minAgeBeforeYieldCheck"],
       // management
       minClaimAmount: ["management", "minClaimAmount"],
       autoSwapAfterClaim: ["management", "autoSwapAfterClaim"],

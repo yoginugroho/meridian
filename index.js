@@ -48,7 +48,6 @@ log("startup", "DLMM LP Agent starting...");
 log("startup", `Mode: ${process.env.DRY_RUN === "true" ? "DRY RUN" : "LIVE"}`);
 log("startup", `Model: ${process.env.LLM_MODEL || "hermes-3-405b"}`);
 
-const TP_PCT = config.management.takeProfitFeePct;
 const DEPLOY = config.management.deployAmountSol;
 
 // ═══════════════════════════════════════════
@@ -337,7 +336,9 @@ export async function runManagementCycle({ silent = false } = {}) {
       // Per-position overrides: strategy can set min_fee_per_tvl_24h and min_age_for_yield_check_min
       const effectiveMinFee =
         tracked?.min_fee_per_tvl_24h ?? config.management.minFeePerTvl24h;
-      const effectiveMinAge = tracked?.min_age_for_yield_check_min ?? 60;
+      const effectiveMinAge =
+        tracked?.min_age_for_yield_check_min ??
+        config.management.minAgeBeforeYieldCheck;
       if (
         p.in_range &&
         p.fee_per_tvl_24h != null &&
@@ -455,6 +456,11 @@ export async function runManagementCycle({ silent = false } = {}) {
             `Phase flip: close failed for ${p.pair}: ${closeResult?.error}`,
           );
           continue;
+        }
+
+        // Record Phase 1 performance against the strategy library
+        if (closeResult.pnl_pct != null) {
+          recordStrategyPerformance(act.strategy_id, closeResult.pnl_pct);
         }
 
         // Step 3: Wait for RPC to reflect the recovered tokens

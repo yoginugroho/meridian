@@ -7,15 +7,11 @@ const DATAPI_JUP = "https://datapi.jup.ag/v1";
 
 const POOL_DISCOVERY_BASE = "https://pool-discovery-api.datapi.meteora.ag";
 
-
-
 /**
  * Fetch pools from the Meteora Pool Discovery API.
  * Returns condensed data optimized for LLM consumption (saves tokens).
  */
-export async function discoverPools({
-  page_size = 50,
-} = {}) {
+export async function discoverPools({ page_size = 50 } = {}) {
   const s = config.screening;
   const filters = [
     "base_token_has_critical_warnings=false",
@@ -33,11 +29,18 @@ export async function discoverPools({
     `fee_active_tvl_ratio>=${s.minFeeActiveTvlRatio}`,
     `base_token_organic_score>=${s.minOrganic}`,
     "quote_token_organic_score>=60",
-    s.minTokenAgeHours != null ? `base_token_created_at<=${Date.now() - s.minTokenAgeHours * 3_600_000}` : null,
-    s.maxTokenAgeHours != null ? `base_token_created_at>=${Date.now() - s.maxTokenAgeHours * 3_600_000}` : null,
-  ].filter(Boolean).join("&&");
+    s.minTokenAgeHours != null
+      ? `base_token_created_at<=${Date.now() - s.minTokenAgeHours * 3_600_000}`
+      : null,
+    s.maxTokenAgeHours != null
+      ? `base_token_created_at>=${Date.now() - s.maxTokenAgeHours * 3_600_000}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join("&&");
 
-  const url = `${POOL_DISCOVERY_BASE}/pools?` +
+  const url =
+    `${POOL_DISCOVERY_BASE}/pools?` +
     `page_size=${page_size}` +
     `&filter_by=${encodeURIComponent(filters)}` +
     `&timeframe=${s.timeframe}` +
@@ -46,7 +49,9 @@ export async function discoverPools({
   const res = await fetch(url);
 
   if (!res.ok) {
-    throw new Error(`Pool Discovery API error: ${res.status} ${res.statusText}`);
+    throw new Error(
+      `Pool Discovery API error: ${res.status} ${res.statusText}`,
+    );
   }
 
   const data = await res.json();
@@ -56,18 +61,28 @@ export async function discoverPools({
   // Hard-filter blacklisted tokens and blocked deployers (what pool discovery already gave us)
   let pools = condensed.filter((p) => {
     if (isBlacklisted(p.base?.mint)) {
-      log("blacklist", `Filtered blacklisted token ${p.base?.symbol} (${p.base?.mint?.slice(0, 8)}) in pool ${p.name}`);
+      log(
+        "blacklist",
+        `Filtered blacklisted token ${p.base?.symbol} (${p.base?.mint?.slice(0, 8)}) in pool ${p.name}`,
+      );
       return false;
     }
     if (p.dev && isDevBlocked(p.dev)) {
-      log("dev_blocklist", `Filtered blocked deployer ${p.dev?.slice(0, 8)} token ${p.base?.symbol} in pool ${p.name}`);
+      log(
+        "dev_blocklist",
+        `Filtered blocked deployer ${p.dev?.slice(0, 8)} token ${p.base?.symbol} in pool ${p.name}`,
+      );
       return false;
     }
     return true;
   });
 
   const filtered = condensed.length - pools.length;
-  if (filtered > 0) log("blacklist", `Filtered ${filtered} pool(s) with blacklisted tokens/devs`);
+  if (filtered > 0)
+    log(
+      "blacklist",
+      `Filtered ${filtered} pool(s) with blacklisted tokens/devs`,
+    );
 
   // If pool discovery didn't supply dev field, batch-fetch from Jupiter for any pools
   // where dev is null — but only if the dev blocklist is non-empty (avoid useless calls)
@@ -78,13 +93,13 @@ export async function discoverPools({
       const devResults = await Promise.allSettled(
         missingDev.map((p) =>
           fetch(`${DATAPI_JUP}/assets/search?query=${p.base.mint}`)
-            .then((r) => r.ok ? r.json() : null)
+            .then((r) => (r.ok ? r.json() : null))
             .then((d) => {
               const t = Array.isArray(d) ? d[0] : d;
               return { pool: p.pool, dev: t?.dev || null };
             })
-            .catch(() => ({ pool: p.pool, dev: null }))
-        )
+            .catch(() => ({ pool: p.pool, dev: null })),
+        ),
       );
       const devMap = {};
       for (const r of devResults) {
@@ -94,11 +109,28 @@ export async function discoverPools({
         const dev = devMap[p.pool];
         if (dev) p.dev = dev; // enrich in-place
         if (dev && isDevBlocked(dev)) {
-          log("dev_blocklist", `Filtered blocked deployer (jup) ${dev.slice(0, 8)} token ${p.base?.symbol}`);
+          log(
+            "dev_blocklist",
+            `Filtered blocked deployer (jup) ${dev.slice(0, 8)} token ${p.base?.symbol}`,
+          );
           return false;
         }
         return true;
       });
+    }
+  }
+
+  // Volatility max post-filter — API doesn't support this directly
+  if (s.maxVolatility != null) {
+    const beforeVol = pools.length;
+    pools = pools.filter(
+      (p) => p.volatility == null || p.volatility <= s.maxVolatility,
+    );
+    if (pools.length < beforeVol) {
+      log(
+        "screening",
+        `Volatility filter: removed ${beforeVol - pools.length} pool(s) above maxVolatility=${s.maxVolatility}`,
+      );
     }
   }
 
@@ -120,88 +152,148 @@ export async function getTopCandidates({ limit = 10 } = {}) {
   const { getMyPositions } = await import("./dlmm.js");
   const { positions } = await getMyPositions();
   const occupiedPools = new Set(positions.map((p) => p.pool));
-  const occupiedMints = new Set(positions.map((p) => p.base_mint).filter(Boolean));
+  const occupiedMints = new Set(
+    positions.map((p) => p.base_mint).filter(Boolean),
+  );
 
   const eligible = pools
-    .filter((p) => !occupiedPools.has(p.pool) && !occupiedMints.has(p.base?.mint))
+    .filter(
+      (p) => !occupiedPools.has(p.pool) && !occupiedMints.has(p.base?.mint),
+    )
     .slice(0, limit);
 
   // Enrich with OKX data — advanced info (risk/bundle/sniper) + ATH price (no API key required)
   if (eligible.length > 0) {
-    const { getAdvancedInfo, getPriceInfo, getClusterList, getRiskFlags } = await import("./okx.js");
+    const { getAdvancedInfo, getPriceInfo, getClusterList, getRiskFlags } =
+      await import("./okx.js");
     const okxResults = await Promise.allSettled(
-      eligible.map((p) => p.base?.mint
-        ? Promise.all([getAdvancedInfo(p.base.mint), getPriceInfo(p.base.mint), getClusterList(p.base.mint), getRiskFlags(p.base.mint)])
-        : Promise.resolve([null, null, [], null])
-      )
+      eligible.map((p) =>
+        p.base?.mint
+          ? Promise.all([
+              getAdvancedInfo(p.base.mint),
+              getPriceInfo(p.base.mint),
+              getClusterList(p.base.mint),
+              getRiskFlags(p.base.mint),
+            ])
+          : Promise.resolve([null, null, [], null]),
+      ),
     );
     for (let i = 0; i < eligible.length; i++) {
       const r = okxResults[i];
       if (r.status !== "fulfilled") continue;
       const [adv, price, clusters, risk] = r.value;
       if (adv) {
-        eligible[i].risk_level      = adv.risk_level;
-        eligible[i].bundle_pct      = adv.bundle_pct;
-        eligible[i].sniper_pct      = adv.sniper_pct;
-        eligible[i].suspicious_pct  = adv.suspicious_pct;
+        eligible[i].risk_level = adv.risk_level;
+        eligible[i].bundle_pct = adv.bundle_pct;
+        eligible[i].sniper_pct = adv.sniper_pct;
+        eligible[i].suspicious_pct = adv.suspicious_pct;
         eligible[i].smart_money_buy = adv.smart_money_buy;
-        eligible[i].dev_sold_all    = adv.dev_sold_all;
-        eligible[i].dex_boost       = adv.dex_boost;
+        eligible[i].dev_sold_all = adv.dev_sold_all;
+        eligible[i].dex_boost = adv.dex_boost;
         eligible[i].dex_screener_paid = adv.dex_screener_paid;
         if (adv.creator && !eligible[i].dev) eligible[i].dev = adv.creator;
       }
       if (risk) {
         eligible[i].is_rugpull = risk.is_rugpull;
-        eligible[i].is_wash    = risk.is_wash;
+        eligible[i].is_wash = risk.is_wash;
       }
       if (price) {
         eligible[i].price_vs_ath_pct = price.price_vs_ath_pct;
-        eligible[i].ath              = price.ath;
+        eligible[i].ath = price.ath;
       }
       if (clusters?.length) {
         // Surface KOL presence and top cluster trend for LLM
-        eligible[i].kol_in_clusters      = clusters.some((c) => c.has_kol);
-        eligible[i].top_cluster_trend    = clusters[0]?.trend ?? null;      // buy|sell|neutral
+        eligible[i].kol_in_clusters = clusters.some((c) => c.has_kol);
+        eligible[i].top_cluster_trend = clusters[0]?.trend ?? null; // buy|sell|neutral
         eligible[i].top_cluster_hold_pct = clusters[0]?.holding_pct ?? null;
       }
     }
     // Wash trading hard filter — fake volume = misleading fee yield
-    eligible.splice(0, eligible.length, ...eligible.filter((p) => {
-      if (p.is_wash) { log("screening", `Risk filter: dropped ${p.name} — wash trading flagged`); return false; }
-      return true;
-    }));
+    eligible.splice(
+      0,
+      eligible.length,
+      ...eligible.filter((p) => {
+        if (p.is_wash) {
+          log(
+            "screening",
+            `Risk filter: dropped ${p.name} — wash trading flagged`,
+          );
+          return false;
+        }
+        return true;
+      }),
+    );
+
+    // New wallet % hard filter — high new_wallet_pct = coordinated snipe campaign
+    const maxNewWalletPct = config.screening.maxNewWalletPct;
+    if (maxNewWalletPct != null) {
+      eligible.splice(
+        0,
+        eligible.length,
+        ...eligible.filter((p) => {
+          if (p.new_wallet_pct == null) return true;
+          if (p.new_wallet_pct > maxNewWalletPct) {
+            log(
+              "screening",
+              `New wallet filter: dropped ${p.name} — new_wallet_pct ${p.new_wallet_pct}% > ${maxNewWalletPct}%`,
+            );
+            return false;
+          }
+          return true;
+        }),
+      );
+    }
 
     // ATH filter — drop pools where price is too close to ATH
     const athFilter = config.screening.athFilterPct;
     if (athFilter != null) {
       const threshold = 100 + athFilter; // e.g. -20 → threshold = 80 (price must be <= 80% of ATH)
       const before = eligible.length;
-      eligible.splice(0, eligible.length, ...eligible.filter((p) => {
-        if (p.price_vs_ath_pct == null) return true; // no data → don't filter
-        if (p.price_vs_ath_pct > threshold) {
-          log("screening", `ATH filter: dropped ${p.name} — ${p.price_vs_ath_pct}% of ATH (limit: ${threshold}%)`);
-          return false;
-        }
-        return true;
-      }));
-      if (eligible.length < before) log("screening", `ATH filter removed ${before - eligible.length} pool(s)`);
+      eligible.splice(
+        0,
+        eligible.length,
+        ...eligible.filter((p) => {
+          if (p.price_vs_ath_pct == null) return true; // no data → don't filter
+          if (p.price_vs_ath_pct > threshold) {
+            log(
+              "screening",
+              `ATH filter: dropped ${p.name} — ${p.price_vs_ath_pct}% of ATH (limit: ${threshold}%)`,
+            );
+            return false;
+          }
+          return true;
+        }),
+      );
+      if (eligible.length < before)
+        log(
+          "screening",
+          `ATH filter removed ${before - eligible.length} pool(s)`,
+        );
     }
 
     // Drop any pools whose creator is on the dev blocklist (caught via advanced-info)
     const before = eligible.length;
     const filtered = eligible.filter((p) => {
       if (p.dev && isDevBlocked(p.dev)) {
-        log("dev_blocklist", `Filtered blocked deployer (okx) ${p.dev.slice(0, 8)} token ${p.base?.symbol}`);
+        log(
+          "dev_blocklist",
+          `Filtered blocked deployer (okx) ${p.dev.slice(0, 8)} token ${p.base?.symbol}`,
+        );
         return false;
       }
       return true;
     });
     eligible.splice(0, eligible.length, ...filtered);
-    if (eligible.length < before) log("dev_blocklist", `Filtered ${before - eligible.length} pool(s) via OKX creator check`);
+    if (eligible.length < before)
+      log(
+        "dev_blocklist",
+        `Filtered ${before - eligible.length} pool(s) via OKX creator check`,
+      );
   }
 
   return {
     candidates: eligible,
+    total_eligible: eligible.length,
     total_screened: pools.length,
   };
 }
@@ -212,7 +304,8 @@ export async function getTopCandidates({ limit = 10 } = {}) {
  * Returns the full unfiltered API object (all fields, not condensed).
  */
 export async function getPoolDetail({ pool_address, timeframe = "5m" }) {
-  const url = `${POOL_DISCOVERY_BASE}/pools?` +
+  const url =
+    `${POOL_DISCOVERY_BASE}/pools?` +
     `page_size=1` +
     `&filter_by=${encodeURIComponent(`pool_address=${pool_address}`)}` +
     `&timeframe=${timeframe}`;
@@ -260,11 +353,13 @@ function condensePool(p) {
     fee_window: round(p.fee),
     volume_window: round(p.volume),
     // API sometimes returns 0 for fee_active_tvl_ratio on short timeframes — compute from raw values as fallback
-    fee_active_tvl_ratio: p.fee_active_tvl_ratio > 0
-      ? fix(p.fee_active_tvl_ratio, 4)
-      : (p.active_tvl > 0 ? fix((p.fee / p.active_tvl) * 100, 4) : 0),
+    fee_active_tvl_ratio:
+      p.fee_active_tvl_ratio > 0
+        ? fix(p.fee_active_tvl_ratio, 4)
+        : p.active_tvl > 0
+          ? fix((p.fee / p.active_tvl) * 100, 4)
+          : 0,
     volatility: fix(p.volatility, 2),
-
 
     // Token health
     holders: p.base_token_holders,

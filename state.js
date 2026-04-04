@@ -411,13 +411,12 @@ export function updatePnlAndCheckExits(
     const minutesOOR = Math.floor(
       (Date.now() - new Date(pos.out_of_range_since).getTime()) / 60000,
     );
-    if (
-      minutesOOR >=
-      (pos.oor_timeout_minutes ?? mgmtConfig.outOfRangeWaitMinutes)
-    ) {
+    const oorTimeoutUsed =
+      pos.oor_timeout_minutes ?? mgmtConfig.outOfRangeWaitMinutes;
+    if (minutesOOR >= oorTimeoutUsed) {
       return {
         action: "OUT_OF_RANGE",
-        reason: `Out of range for ${minutesOOR}m (limit: ${mgmtConfig.outOfRangeWaitMinutes}m)`,
+        reason: `Out of range for ${minutesOOR}m (limit: ${oorTimeoutUsed}m)`,
       };
     }
   }

@@ -47,6 +47,7 @@ export const config = {
     minTokenAgeHours: u.minTokenAgeHours ?? null, // null = no minimum
     maxTokenAgeHours: u.maxTokenAgeHours ?? null, // null = no maximum
     athFilterPct: u.athFilterPct ?? null, // e.g. -20 = only deploy if price is >= 20% below ATH
+    maxNewWalletPct: u.maxNewWalletPct ?? null, // null = no filter; e.g. 70 = drop if >70% wallets are fresh (snipe signal)
   },
 
   // ─── Position Management ────────────────
@@ -160,6 +161,9 @@ export function reloadScreeningThresholds() {
     if (fresh.maxBundlePct != null) s.maxBundlePct = fresh.maxBundlePct;
     if (fresh.maxBotHoldersPct != null)
       s.maxBotHoldersPct = fresh.maxBotHoldersPct;
+    if (fresh.maxVolatility != null) s.maxVolatility = fresh.maxVolatility;
+    if (fresh.maxNewWalletPct !== undefined)
+      s.maxNewWalletPct = fresh.maxNewWalletPct;
   } catch {
     /* ignore */
   }

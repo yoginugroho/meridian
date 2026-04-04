@@ -77,6 +77,10 @@ export function recordPoolDeploy(poolAddress, deployData) {
   };
 
   entry.deploys.push(deploy);
+  // Keep only last 50 deploys to prevent unbounded growth
+  if (entry.deploys.length > 50) {
+    entry.deploys = entry.deploys.slice(-50);
+  }
   entry.total_deploys = entry.deploys.length;
   entry.last_deployed_at = deploy.closed_at;
   entry.last_outcome = (deploy.pnl_pct ?? 0) >= 0 ? "profit" : "loss";
@@ -84,12 +88,14 @@ export function recordPoolDeploy(poolAddress, deployData) {
   // Recompute aggregates
   const withPnl = entry.deploys.filter((d) => d.pnl_pct != null);
   if (withPnl.length > 0) {
-    entry.avg_pnl_pct = Math.round(
-      (withPnl.reduce((s, d) => s + d.pnl_pct, 0) / withPnl.length) * 100
-    ) / 100;
-    entry.win_rate = Math.round(
-      (withPnl.filter((d) => d.pnl_pct >= 0).length / withPnl.length) * 100
-    ) / 100;
+    entry.avg_pnl_pct =
+      Math.round(
+        (withPnl.reduce((s, d) => s + d.pnl_pct, 0) / withPnl.length) * 100,
+      ) / 100;
+    entry.win_rate =
+      Math.round(
+        (withPnl.filter((d) => d.pnl_pct >= 0).length / withPnl.length) * 100,
+      ) / 100;
   }
 
   if (deployData.base_mint && !entry.base_mint) {
@@ -99,12 +105,20 @@ export function recordPoolDeploy(poolAddress, deployData) {
   // Set cooldown for low yield closes — pool wasn't profitable enough, don't redeploy soon
   if (deploy.close_reason === "low yield") {
     const cooldownHours = 4;
-    entry.cooldown_until = new Date(Date.now() + cooldownHours * 60 * 60 * 1000).toISOString();
-    log("pool-memory", `Cooldown set for ${entry.name} until ${entry.cooldown_until} (low yield close)`);
+    entry.cooldown_until = new Date(
+      Date.now() + cooldownHours * 60 * 60 * 1000,
+    ).toISOString();
+    log(
+      "pool-memory",
+      `Cooldown set for ${entry.name} until ${entry.cooldown_until} (low yield close)`,
+    );
   }
 
   save(db);
-  log("pool-memory", `Recorded deploy for ${entry.name} (${poolAddress.slice(0, 8)}): PnL ${deploy.pnl_pct}%`);
+  log(
+    "pool-memory",
+    `Recorded deploy for ${entry.name} (${poolAddress.slice(0, 8)}): PnL ${deploy.pnl_pct}%`,
+  );
 }
 
 export function isPoolOnCooldown(poolAddress) {
@@ -209,7 +223,9 @@ export function recallForPool(poolAddress) {
 
   // Deploy history summary
   if (entry.total_deploys > 0) {
-    lines.push(`POOL MEMORY [${entry.name}]: ${entry.total_deploys} past deploy(s), avg PnL ${entry.avg_pnl_pct}%, win rate ${entry.win_rate}%, last outcome: ${entry.last_outcome}`);
+    lines.push(
+      `POOL MEMORY [${entry.name}]: ${entry.total_deploys} past deploy(s), avg PnL ${entry.avg_pnl_pct}%, win rate ${entry.win_rate}%, last outcome: ${entry.last_outcome}`,
+    );
   }
 
   // Recent snapshot trend (last 6 = ~30min)
@@ -217,11 +233,14 @@ export function recallForPool(poolAddress) {
   if (snaps.length >= 2) {
     const first = snaps[0];
     const last = snaps[snaps.length - 1];
-    const pnlTrend = last.pnl_pct != null && first.pnl_pct != null
-      ? (last.pnl_pct - first.pnl_pct).toFixed(2)
-      : null;
-    const oorCount = snaps.filter(s => s.in_range === false).length;
-    lines.push(`RECENT TREND: PnL drift ${pnlTrend !== null ? (pnlTrend >= 0 ? "+" : "") + pnlTrend + "%" : "unknown"} over last ${snaps.length} cycles, OOR in ${oorCount}/${snaps.length} cycles`);
+    const pnlTrend =
+      last.pnl_pct != null && first.pnl_pct != null
+        ? (last.pnl_pct - first.pnl_pct).toFixed(2)
+        : null;
+    const oorCount = snaps.filter((s) => s.in_range === false).length;
+    lines.push(
+      `RECENT TREND: PnL drift ${pnlTrend !== null ? (pnlTrend >= 0 ? "+" : "") + pnlTrend + "%" : "unknown"} over last ${snaps.length} cycles, OOR in ${oorCount}/${snaps.length} cycles`,
+    );
   }
 
   // Notes

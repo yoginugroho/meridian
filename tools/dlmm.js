@@ -1047,7 +1047,7 @@ export async function closePosition({ position_address, reason }) {
         position: position_address,
         pool: poolAddress,
         pool_name: tracked.pool_name || poolAddress.slice(0, 8),
-        strategy: tracked.strategy,
+        strategy: tracked.strategy_id || tracked.strategy,
         bin_range: tracked.bin_range,
         bin_step: tracked.bin_step || null,
         volatility: tracked.volatility || null,

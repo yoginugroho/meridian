@@ -52,6 +52,7 @@ const INTENT_TOOLS = {
   ]),
   close: new Set([
     "close_position",
+    "withdraw_liquidity",
     "get_my_positions",
     "get_position_pnl",
     "get_wallet_balance",
