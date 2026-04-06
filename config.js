@@ -65,6 +65,7 @@ export const config = {
     deployAmountSol: u.deployAmountSol ?? 0.5,
     gasReserve: u.gasReserve ?? 0.2,
     positionSizePct: u.positionSizePct ?? 0.35,
+    fixedDeployAmount: u.fixedDeployAmount ?? null, // if set, always deploy exactly this amount (disables compounding formula)
     // Trailing take-profit
     trailingTakeProfit: u.trailingTakeProfit ?? true,
     trailingTriggerPct: u.trailingTriggerPct ?? 3, // activate trailing at X% PnL
@@ -109,17 +110,27 @@ export const config = {
 
 /**
  * Compute the optimal deploy amount for a given wallet balance.
- * Scales position size with wallet growth (compounding).
  *
- * Formula: clamp(deployable × positionSizePct, floor=deployAmountSol, ceil=maxDeployAmount)
+ * If fixedDeployAmount is set in config, always returns that exact value —
+ * no compounding, no scaling. This is the simple "X SOL per position" mode.
  *
- * Examples (defaults: gasReserve=0.2, positionSizePct=0.35, floor=0.5):
- *   0.8 SOL wallet → 0.6 SOL deploy  (floor)
+ * Otherwise uses the compounding formula:
+ *   clamp(deployable × positionSizePct, floor=deployAmountSol, ceil=maxDeployAmount)
+ *
+ * Compounding examples (defaults: gasReserve=0.2, positionSizePct=0.35, floor=0.5):
+ *   0.8 SOL wallet → 0.50 SOL deploy  (floor)
  *   2.0 SOL wallet → 0.63 SOL deploy
  *   3.0 SOL wallet → 0.98 SOL deploy
  *   4.0 SOL wallet → 1.33 SOL deploy
  */
 export function computeDeployAmount(walletSol) {
+  // Fixed mode: always deploy exactly this amount, ignore wallet size
+  const fixed = config.management.fixedDeployAmount;
+  if (fixed != null && fixed > 0) {
+    return parseFloat(fixed.toFixed(2));
+  }
+
+  // Compounding mode: scale with wallet balance
   const reserve = config.management.gasReserve ?? 0.2;
   const pct = config.management.positionSizePct ?? 0.35;
   const floor = config.management.deployAmountSol;

@@ -219,6 +219,7 @@ const toolMap = {
       solMode: ["management", "solMode"],
       minSolToOpen: ["management", "minSolToOpen"],
       deployAmountSol: ["management", "deployAmountSol"],
+      fixedDeployAmount: ["management", "fixedDeployAmount"],
       gasReserve: ["management", "gasReserve"],
       positionSizePct: ["management", "positionSizePct"],
       // risk
