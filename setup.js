@@ -289,23 +289,40 @@ console.log(
 // ─── Section 4: Deployment ────────────────────────────────────────────────────
 console.log("── Deployment ────────────────────────────────────────────────");
 
-const deployAmountSol = await askNum(
-  "SOL to deploy per position (minimum floor — actual amount scales with wallet size)",
-  e("deployAmountSol", 0.3),
-  { min: 0.01, max: 50 },
+const useFixedDeploy = await askBool(
+  "Fixed SOL per position? (yes = always deploy exact amount, no = scale with wallet balance)",
+  e("fixedDeployAmount", null) != null,
 );
 
-const positionSizePct = await askNum(
-  "Position size as fraction of wallet (e.g. 0.35 = 35% of wallet per deploy).\n  The actual deploy = max(deployAmountSol, wallet × positionSizePct), capped by maxDeployAmount",
-  e("positionSizePct", 0.35),
-  { min: 0.05, max: 1.0 },
-);
+let fixedDeployAmount, deployAmountSol, positionSizePct, maxDeployAmount;
 
-const maxDeployAmount = await askNum(
-  "Max SOL to deploy in a single position (capital risk cap)",
-  e("maxDeployAmount", 5),
-  { min: 0.1 },
-);
+if (useFixedDeploy) {
+  fixedDeployAmount = await askNum(
+    "SOL to deploy per position (exact fixed amount, never scales)",
+    e("fixedDeployAmount", e("deployAmountSol", 0.2)),
+    { min: 0.01, max: 50 },
+  );
+  deployAmountSol = null;
+  positionSizePct = null;
+  maxDeployAmount = null;
+} else {
+  fixedDeployAmount = null;
+  deployAmountSol = await askNum(
+    "SOL floor per position (minimum deploy amount — actual amount scales with wallet size)",
+    e("deployAmountSol", 0.3),
+    { min: 0.01, max: 50 },
+  );
+  positionSizePct = await askNum(
+    "Position size as fraction of wallet (e.g. 0.35 = 35% of wallet per deploy).\n  The actual deploy = max(deployAmountSol, wallet × positionSizePct), capped by maxDeployAmount",
+    e("positionSizePct", 0.35),
+    { min: 0.05, max: 1.0 },
+  );
+  maxDeployAmount = await askNum(
+    "Max SOL to deploy in a single position (capital risk cap)",
+    e("maxDeployAmount", 5),
+    { min: 0.1 },
+  );
+}
 
 const maxPositions = await askNum(
   "Max concurrent open positions",
@@ -319,9 +336,10 @@ const gasReserve = await askNum(
   { min: 0.05 },
 );
 
+const _minSolFloor = fixedDeployAmount ?? deployAmountSol ?? 0.2;
 const minSolToOpen = await askNum(
   "Min SOL balance required to open a new position",
-  e("minSolToOpen", parseFloat((deployAmountSol + gasReserve).toFixed(3))),
+  e("minSolToOpen", parseFloat((_minSolFloor + gasReserve).toFixed(3))),
   { min: 0.05 },
 );
 
@@ -544,9 +562,19 @@ const userConfig = {
   telegramChatId: telegramChatId || "",
 
   // ── Deployment ───────────────────────────────────────────────────────
-  deployAmountSol,
-  positionSizePct,
-  maxDeployAmount,
+  ...(fixedDeployAmount != null
+    ? {
+        fixedDeployAmount,
+        deployAmountSol: null,
+        positionSizePct: null,
+        maxDeployAmount: null,
+      }
+    : {
+        fixedDeployAmount: null,
+        deployAmountSol,
+        positionSizePct,
+        maxDeployAmount,
+      }),
   maxPositions,
   gasReserve,
   minSolToOpen,
@@ -590,7 +618,7 @@ console.log(`
   Preset:       ${presetName}
   Dry run:      ${dryRun ? "YES — no real transactions" : "NO — live trading"}
 
-  Deploy:       ${deployAmountSol} SOL floor  ·  ${(positionSizePct * 100).toFixed(0)}% of wallet  ·  max ${maxDeployAmount} SOL/position
+  Deploy:       ${fixedDeployAmount != null ? `${fixedDeployAmount} SOL fixed per position` : `${deployAmountSol} SOL floor  ·  ${(positionSizePct * 100).toFixed(0)}% of wallet  ·  max ${maxDeployAmount} SOL/position`}
   Positions:    max ${maxPositions} open  ·  gas reserve ${gasReserve} SOL  ·  open when ≥ ${minSolToOpen} SOL
 
   Timeframe:    ${timeframe}  ·  fee/TVL ≥ ${minFeeActiveTvlRatio}  ·  organic ≥ ${minOrganic}  ·  holders ≥ ${minHolders}
