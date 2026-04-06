@@ -10,6 +10,7 @@ Meridian runs continuous screening and management cycles, deploying capital into
 
 - **Screens pools** — scans Meteora DLMM pools against configurable thresholds (fee/TVL ratio, organic score, holder count, mcap, bin step) and surfaces high-quality opportunities
 - **Manages positions** — monitors, claims fees, and closes LP positions autonomously; decides to STAY, CLOSE, or REDEPLOY based on live data
+- **Strategy library** — 8 built-in LP strategies (bid-ask, spot, two-phase flips) each with their own exit rules that override global defaults per-position
 - **Learns from performance** — studies top LPers in target pools, saves structured lessons, and evolves screening thresholds based on closed position history
 - **Discord signals** — optional Discord listener watches LP Army channels for Solana token calls and queues them for screening
 - **Telegram chat** — full agent chat via Telegram, plus cycle reports and OOR alerts
@@ -126,7 +127,11 @@ REPL commands:
 | `/learn <pool_address>` | Study top LPers for a specific pool |
 | `/thresholds` | Current screening thresholds and performance stats |
 | `/evolve` | Trigger threshold evolution from performance data (needs 5+ closed positions) |
+| `/briefing` | Generate and display the daily performance briefing |
 | `/stop` | Graceful shutdown |
+| `1`, `2`, `3`... | Deploy into a startup candidate by list number |
+| `auto` | Agent picks the best candidate and deploys automatically |
+| `go` | Start cron cycles without deploying anything first |
 | `<anything>` | Free-form chat — ask the agent anything, request actions, analyze pools |
 
 ---
@@ -223,7 +228,7 @@ meridian token-narrative --mint <addr>
 **Deploy & manage**
 
 ```bash
-meridian deploy --pool <addr> --amount <sol> [--bins-below 69] [--bins-above 0] [--strategy bid_ask|spot|curve] [--dry-run]
+meridian deploy --pool <addr> --amount <sol> [--bins-below 69] [--bins-above 0] [--strategy bid_ask|spot] [--strategy-id <id>] [--dry-run]
 meridian claim --position <addr>
 meridian close --position <addr> [--skip-swap] [--dry-run]
 meridian swap --from <mint> --to <mint> --amount <n> [--dry-run]
@@ -244,6 +249,14 @@ meridian start [--dry-run]               # start autonomous agent with cron jobs
 ```bash
 meridian config get
 meridian config set <key> <value>
+```
+
+**Strategies**
+
+```bash
+meridian strategies list
+meridian strategies get <id>
+meridian strategies set-active <id>
 ```
 
 **Learning & memory**
@@ -365,7 +378,7 @@ Meridian sends notifications automatically for:
 |---|---|
 | `/positions` | List open positions with progress bar |
 | `/close <n>` | Close position by list index |
-| `/set <n> <note>` | Set a note on a position |
+| `/set <n> <note>` | Set a note or instruction on a position |
 
 You can also chat freely via Telegram using the same interface as the REPL.
 
@@ -373,40 +386,82 @@ You can also chat freely via Telegram using the same interface as the REPL.
 
 ## Config reference
 
-All fields are optional — defaults shown. Edit `user-config.json`.
+All fields are optional — defaults shown. Edit `user-config.json` directly or use `update_config` via the agent chat.
 
 ### Screening
 
 | Field | Default | Description |
 |---|---|---|
-| `minFeeActiveTvlRatio` | `0.05` | Minimum fee/active-TVL ratio |
+| `timeframe` | `5m` | Candle timeframe for pool metrics (`5m` `15m` `1h` `2h` `4h` `12h` `24h`) |
+| `category` | `trending` | Pool category filter |
+| `minFeeActiveTvlRatio` | `0.05` | Minimum fee/active-TVL ratio (interpret relative to timeframe — see table below) |
 | `minTvl` | `10000` | Minimum pool TVL (USD) |
 | `maxTvl` | `150000` | Maximum pool TVL (USD) |
-| `minVolume` | `500` | Minimum pool volume |
+| `minVolume` | `500` | Minimum pool volume over timeframe window |
 | `minOrganic` | `60` | Minimum organic score (0–100) |
 | `minHolders` | `500` | Minimum token holder count |
 | `minMcap` | `150000` | Minimum market cap (USD) |
 | `maxMcap` | `10000000` | Maximum market cap (USD) |
-| `minBinStep` | `80` | Minimum bin step |
-| `maxBinStep` | `125` | Maximum bin step |
-| `timeframe` | `5m` | Candle timeframe for screening |
-| `category` | `trending` | Pool category filter |
-| `minTokenFeesSol` | `30` | Minimum all-time fees in SOL |
-| `maxBundlersPct` | `30` | Maximum bundler % in top 100 holders |
-| `maxTop10Pct` | `60` | Maximum top-10 holder concentration |
-| `blockedLaunchpads` | `[]` | Launchpad names to never deploy into |
+| `minBinStep` | `80` | Minimum pool bin step |
+| `maxBinStep` | `125` | Maximum pool bin step |
+| `minTokenFeesSol` | `30` | Minimum all-time fees paid in SOL (below = bundled/scam) |
+| `maxBundlePct` | `30` | Maximum bundle holding % (OKX advanced-info) |
+| `maxBotHoldersPct` | `30` | Maximum bot holder addresses % (Jupiter audit) |
+| `maxTop10Pct` | `60` | Maximum top-10 holder concentration % |
+| `blockedLaunchpads` | `[]` | Launchpad names to never deploy into (e.g. `["pump.fun"]`) |
+| `minTokenAgeHours` | `null` | Minimum token age in hours (`null` = no minimum) |
+| `maxTokenAgeHours` | `null` | Maximum token age in hours (`null` = no maximum) |
+| `athFilterPct` | `null` | Only deploy if price is within X% of ATH (e.g. `-20` = within 20% below ATH) |
+| `maxNewWalletPct` | `null` | Skip if more than X% of holders are fresh wallets (snipe signal) |
+
+**fee/active-TVL ratio by timeframe** (for `minFeeActiveTvlRatio`):
+
+| Timeframe | Decent | Strong |
+|---|---|---|
+| `5m` | ≥ 0.02 | ≥ 0.05 |
+| `15m` | ≥ 0.05 | ≥ 0.10 |
+| `1h` | ≥ 0.20 | ≥ 0.50 |
+| `2h` | ≥ 0.40 | ≥ 1.00 |
+| `4h` | ≥ 0.80 | ≥ 2.00 |
+| `24h` | ≥ 3.00 | ≥ 8.00 |
 
 ### Management
 
 | Field | Default | Description |
 |---|---|---|
-| `deployAmountSol` | `0.5` | Base SOL per new position |
-| `positionSizePct` | `0.35` | Fraction of deployable balance to use |
-| `maxDeployAmount` | `50` | Maximum SOL cap per position |
+| `deployAmountSol` | `0.5` | Base SOL per new position (floor for compounding formula) |
+| `positionSizePct` | `0.35` | Fraction of deployable wallet balance to use per position |
+| `maxDeployAmount` | `50` | Hard cap on SOL per position |
 | `gasReserve` | `0.2` | Minimum SOL to keep for gas |
-| `minSolToOpen` | `0.55` | Minimum wallet SOL before opening |
-| `outOfRangeWaitMinutes` | `30` | Minutes OOR before acting |
-| `stopLossPct` | `-15` | Close position if price drops by this % |
+| `minSolToOpen` | `0.55` | Minimum wallet SOL before opening a new position |
+| `stopLossPct` | `-50` | Close when total position PnL drops to this % |
+| `takeProfitFeePct` | `5` | Global hard take-profit % — close when PnL reaches this. Set high (e.g. `100`) to rely on trailing TP only. Strategies with an active strategy set override this per-position. |
+| `trailingTakeProfit` | `true` | Master switch for trailing take-profit. Must be `true` for trailing to activate on positions without strategy metadata. Strategy positions are always protected regardless of this flag. |
+| `trailingTriggerPct` | `3` | Activate trailing TP when position PnL reaches +X% |
+| `trailingDropPct` | `1.5` | Fire trailing TP when PnL drops X% from its peak |
+| `outOfRangeBinsToClose` | `10` | Close immediately if active bin is more than X bins above upper bin (pumped far above range) |
+| `outOfRangeWaitMinutes` | `30` | Minutes OOR before closing (global default — strategies override per-position) |
+| `minFeePerTvl24h` | `7` | Close in-range positions earning less than X% fee/TVL per day (opportunity cost exit). Strategies override per-position. |
+| `minAgeBeforeYieldCheck` | `60` | Minutes a position must be open before low-yield exit can trigger |
+| `minClaimAmount` | `5` | Minimum unclaimed fees (USD) before claiming |
+| `autoSwapAfterClaim` | `false` | Auto-swap base tokens to SOL after every fee claim |
+| `solMode` | `false` | Report positions, PnL, and balances in SOL instead of USD |
+
+**Position size compounding formula:**
+
+```
+deployable = walletSol - gasReserve
+size = clamp(deployable × positionSizePct, floor=deployAmountSol, ceil=maxDeployAmount)
+```
+
+Examples at defaults (gasReserve=0.2, positionSizePct=0.35, floor=0.5):
+
+| Wallet | Deploy size |
+|---|---|
+| 0.8 SOL | 0.5 SOL (floor) |
+| 2.0 SOL | 0.63 SOL |
+| 4.0 SOL | 1.33 SOL |
+| 10 SOL | 3.43 SOL |
 
 ### Schedule
 
@@ -414,16 +469,90 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 |---|---|---|
 | `managementIntervalMin` | `10` | Management cycle frequency (minutes) |
 | `screeningIntervalMin` | `30` | Screening cycle frequency (minutes) |
+| `healthCheckIntervalMin` | `60` | Health check / state sync frequency (minutes) |
 
 ### Models
 
 | Field | Default | Description |
 |---|---|---|
-| `managementModel` | `openai/gpt-oss-20b:free` | LLM for management cycles |
-| `screeningModel` | `openai/gpt-oss-20b:free` | LLM for screening cycles |
-| `generalModel` | `openai/gpt-oss-20b:free` | LLM for REPL / chat |
+| `managementModel` | `openrouter/healer-alpha` | LLM for management cycles |
+| `screeningModel` | `openrouter/hunter-alpha` | LLM for screening cycles |
+| `generalModel` | `openrouter/healer-alpha` | LLM for REPL / chat |
 
 > Override model at runtime: `node cli.js config set screeningModel anthropic/claude-opus-4-5`
+
+---
+
+## Strategy library
+
+Meridian has a built-in library of 8 LP strategies. Each strategy defines:
+- **Entry conditions** — what kind of token/pool to look for
+- **Range config** — bin shape, `bins_below`, `bins_above`
+- **Exit rules** — per-strategy `take_profit_pct`, `trailing_trigger_pct`, `trailing_drop_pct`, `oor_timeout_minutes` that override the global config for each position
+
+When an active strategy is set, its exit rules are written to every deployed position at deploy time. This means two positions in the same pool can have different TP/SL behaviour if they were deployed under different strategies.
+
+### Setting the active strategy
+
+```bash
+# via agent chat
+> set active strategy to spot_wave_enjoyer
+
+# via CLI
+node cli.js strategies set-active spot_wave_enjoyer
+
+# via config tool
+update_config { strategy_id: "spot_wave_enjoyer" }
+```
+
+### Passing strategy_id directly on deploy
+
+If no active strategy is set, you can still attach a strategy's exit rules to a specific deploy by passing `strategy_id` to `deploy_position`:
+
+```
+> deploy 0.5 SOL into pool XYZ using spot_wave_enjoyer strategy
+```
+
+The agent will pass `strategy_id: "spot_wave_enjoyer"` in the tool call and the exit parameters will be applied automatically.
+
+### Built-in strategies
+
+| ID | Name | Risk | Shape | Entry | Exit |
+|---|---|---|---|---|---|
+| `classic_overnight_bid_ask` | Classic / Overnight Bid-Ask | Medium | Wide SOL-only | Post-dip runner, -20–40% from ATH | Trailing TP: activates at 7%, closes on 2% drop |
+| `retrace_bid_ask_flip` | Retrace Bid-Ask Flip | Medium | Tight SOL→Token two-phase | Retrace before pump back to ATH | Phase 1→2 flip; trailing TP: trigger 10%, drop 3% |
+| `tight_bid_ask_quick_flips` | Tight Bid-Ask Quick Flips | High | Tight SOL-only | Dump into range, short bounce | Trailing TP: trigger 4%, drop 1.5%; OOR timeout 5m |
+| `tight_wide_token_recovery` | Tight → Wide Token Recovery | Medium | Tight SOL→Wide Token two-phase | ~40% dump with strong narrative | Phase 1→2 flip; trailing TP: trigger 15%, drop 5% |
+| `afk_passive_bid_ask` | AFK / Passive Bid-Ask | Low | VPVR-concentrated SOL-only | Token at ATH, don't chase — use VPVR zone | Trailing TP: trigger 6%, drop 2%; OOR timeout 3h |
+| `token_sided_deep_dump` | Token-Sided on Deep Dumps | High | Wide token-only upside | 60–80% dump, buy token first then deploy | Trailing TP: trigger 20%, drop 5%; OOR down = instant cut |
+| `spot_wave_enjoyer` | Spot 1–2 Wave Enjoyer | High | Moderate SOL-only spot | Price at support + ≥100K vol/5min | Trailing TP: trigger 5%, drop 2%; OOR timeout 20m |
+| `spot_npc_default_range` | Spot NPC / Default 70-bin | Medium | Wide SOL-only spot | Volume spike + new ATH confirmed | Trailing TP: trigger 10%, drop 3%; OOR timeout 60m; min yield 3% |
+
+### Two-phase strategies
+
+`retrace_bid_ask_flip` and `tight_wide_token_recovery` use an automatic Phase 1 → Phase 2 flip:
+
+1. **Phase 1** — deploy SOL-only on tight bid-ask below current price. As price falls through the range, SOL is gradually converted to tokens.
+2. **Flip trigger** — when the active bin drops below the lower bin (all SOL converted), the management cycle automatically closes Phase 1 and redeploys the recovered tokens into Phase 2.
+3. **Phase 2** — token-only bid-ask with wide upside bins. As price recovers upward through the range, tokens are sold back for SOL, capturing fees on the way up.
+
+No manual intervention is required — the flip is fully automated.
+
+### Viewing and managing strategies
+
+```bash
+# list all strategies with performance stats
+node cli.js strategies list
+
+# inspect a specific strategy
+node cli.js strategies get spot_wave_enjoyer
+
+# set active strategy
+node cli.js strategies set-active spot_wave_enjoyer
+
+# recommend a strategy for current conditions
+> recommend a strategy for this pool: <pool_address>
+```
 
 ---
 
@@ -431,7 +560,7 @@ All fields are optional — defaults shown. Edit `user-config.json`.
 
 ### Lessons
 
-After every closed position the agent runs `studyTopLPers` on candidate pools, analyzes on-chain behavior of top performers (hold duration, entry/exit timing, win rates), and saves concrete lessons. Lessons are injected into subsequent agent cycles as part of the system context.
+After every closed position the agent analyzes on-chain behavior of top LPers and saves concrete lessons. Lessons are injected into subsequent agent cycles as part of the system context.
 
 Add a lesson manually:
 ```bash
@@ -499,19 +628,23 @@ index.js            Main entry: REPL + cron orchestration + Telegram bot polling
 agent.js            ReAct loop: LLM → tool call → repeat
 config.js           Runtime config from user-config.json + .env
 prompt.js           System prompt builder (SCREENER / MANAGER / GENERAL roles)
-state.js            Position registry (state.json)
+state.js            Position registry (state.json): tracks bin ranges, OOR timestamps, trailing TP state
 lessons.js          Learning engine: records performance, derives lessons, evolves thresholds
 pool-memory.js      Per-pool deploy history + snapshots
-strategy-library.js Saved LP strategies
+strategy-library.js LP strategy library (8 built-in strategies with per-position exit rules)
+briefing.js         Daily Telegram briefing generator
 telegram.js         Telegram bot: polling + notifications
+signal-tracker.js   Discord signal tracking and dedup
+signal-weights.js   Signal scoring weights
 hive-mind.js        Optional collective intelligence server sync
 smart-wallets.js    KOL/alpha wallet tracker
 token-blacklist.js  Permanent token blacklist
 cli.js              Direct CLI — every tool as a subcommand with JSON output
+setup.js            Interactive setup wizard
 
 tools/
   definitions.js    Tool schemas (OpenAI format)
-  executor.js       Tool dispatch + safety checks
+  executor.js       Tool dispatch + safety checks + strategy meta injection
   dlmm.js           Meteora DLMM SDK wrapper
   screening.js      Pool discovery
   wallet.js         SOL/token balances + Jupiter swap
