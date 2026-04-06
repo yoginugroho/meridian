@@ -143,9 +143,10 @@ const PRESETS = {
     maxMcap: 5_000_000,
     minTokenFeesSol: 20,
     maxBotHoldersPct: 40,
+    trailingTakeProfit: true, // master switch — must stay true for trailing to activate
     trailingTriggerPct: 4, // activate trailing TP at +4% PnL
     trailingDropPct: 1.5, // close if PnL drops 1.5% from peak
-    takeProfitFeePct: 10, // hard fallback TP at +10% total PnL
+    takeProfitFeePct: 10, // hard fallback TP at +10% total PnL (strategies override per-position)
     stopLossPct: -25,
     outOfRangeWaitMinutes: 15,
     managementIntervalMin: 5,
@@ -163,6 +164,7 @@ const PRESETS = {
     maxMcap: 10_000_000,
     minTokenFeesSol: 30,
     maxBotHoldersPct: 30,
+    trailingTakeProfit: true,
     trailingTriggerPct: 5,
     trailingDropPct: 2,
     takeProfitFeePct: 10,
@@ -183,6 +185,7 @@ const PRESETS = {
     maxMcap: 10_000_000,
     minTokenFeesSol: 40,
     maxBotHoldersPct: 20,
+    trailingTakeProfit: true,
     trailingTriggerPct: 7,
     trailingDropPct: 3,
     takeProfitFeePct: 10,
@@ -559,6 +562,7 @@ const userConfig = {
   maxBotHoldersPct,
 
   // ── Exit Rules ───────────────────────────────────────────────────────
+  trailingTakeProfit: true, // pinned — must never silently flip off; strategies rely on this
   trailingTriggerPct,
   trailingDropPct,
   takeProfitFeePct,
