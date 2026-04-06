@@ -222,9 +222,8 @@ const toolMap = {
       fixedDeployAmount: ["management", "fixedDeployAmount"],
       gasReserve: ["management", "gasReserve"],
       positionSizePct: ["management", "positionSizePct"],
-      // risk
-      maxPositions: ["risk", "maxPositions"],
-      maxDeployAmount: ["risk", "maxDeployAmount"],
+      // risk — maxPositions and maxDeployAmount are intentionally excluded;
+      // these are user-only safety limits the agent must never self-modify.
       // schedule
       managementIntervalMin: ["schedule", "managementIntervalMin"],
       screeningIntervalMin: ["schedule", "screeningIntervalMin"],
