@@ -217,13 +217,9 @@ const toolMap = {
       trailingTriggerPct: ["management", "trailingTriggerPct"],
       trailingDropPct: ["management", "trailingDropPct"],
       solMode: ["management", "solMode"],
-      minSolToOpen: ["management", "minSolToOpen"],
-      deployAmountSol: ["management", "deployAmountSol"],
-      fixedDeployAmount: ["management", "fixedDeployAmount"],
-      gasReserve: ["management", "gasReserve"],
-      positionSizePct: ["management", "positionSizePct"],
-      // risk — maxPositions and maxDeployAmount are intentionally excluded;
-      // these are user-only safety limits the agent must never self-modify.
+      // ── Locked keys — user-only, agent must never self-modify ─────────────
+      // gasReserve, fixedDeployAmount, deployAmountSol, positionSizePct,
+      // minSolToOpen, maxPositions, maxDeployAmount are intentionally excluded.
       // schedule
       managementIntervalMin: ["schedule", "managementIntervalMin"],
       screeningIntervalMin: ["schedule", "screeningIntervalMin"],
@@ -263,10 +259,43 @@ const toolMap = {
     }
 
     // Apply to live config immediately
+    // Guarded keys — agent can tune these but within safe bounds
+    const GUARDED_KEYS = {
+      stopLossPct: { min: -40, max: -5 }, // no looser than -40%, no tighter than -5%
+      trailingTriggerPct: { min: 2, max: null }, // must activate at ≥2% gain
+      trailingDropPct: { min: 0.5, max: 10 }, // must close within 0.5–10% drop from peak
+      maxBotHoldersPct: { min: null, max: 50 }, // bot detection floor — never above 50%
+      maxBundlePct: { min: null, max: 50 }, // bundler detection floor — never above 50%
+      managementIntervalMin: { min: 5, max: null }, // no faster than every 5 min
+      screeningIntervalMin: { min: 15, max: null }, // no faster than every 15 min
+    };
+
     for (const [key, val] of Object.entries(applied)) {
       const [section, field] = CONFIG_MAP[key];
       const before = config[section][field];
-      config[section][field] = val;
+
+      // Apply guard clamp if this key has limits
+      let safeVal = val;
+      const guard = GUARDED_KEYS[key];
+      if (guard) {
+        if (guard.min != null && safeVal < guard.min) {
+          log(
+            "config",
+            `update_config: ${key} clamped ${safeVal} → ${guard.min} (guard floor)`,
+          );
+          safeVal = guard.min;
+        }
+        if (guard.max != null && safeVal > guard.max) {
+          log(
+            "config",
+            `update_config: ${key} clamped ${safeVal} → ${guard.max} (guard ceiling)`,
+          );
+          safeVal = guard.max;
+        }
+        applied[key] = safeVal;
+      }
+
+      config[section][field] = safeVal;
       log(
         "config",
         `update_config: config.${section}.${field} ${before} → ${val} (verify: ${config[section][field]})`,

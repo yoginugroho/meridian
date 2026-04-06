@@ -465,10 +465,22 @@ Changes persist to user-config.json and take effect immediately — no restart n
 
 VALID KEYS (use EXACTLY these key names, nothing else):
 Screening: minFeeActiveTvlRatio, minTvl, maxTvl, minVolume, minOrganic, minHolders, minMcap, maxMcap, minBinStep, maxBinStep, timeframe, category, minTokenFeesSol, maxVolatility, maxNewWalletPct
-Management: minClaimAmount, outOfRangeBinsToClose, outOfRangeWaitMinutes, minVolumeToRebalance, stopLossPct, takeProfitFeePct, minSolToOpen, fixedDeployAmount, deployAmountSol, gasReserve, positionSizePct, minAgeBeforeYieldCheck
-Schedule: managementIntervalMin, screeningIntervalMin
+Management: minClaimAmount, outOfRangeBinsToClose, outOfRangeWaitMinutes, minVolumeToRebalance, stopLossPct, takeProfitFeePct, trailingTakeProfit, trailingTriggerPct, trailingDropPct, maxBotHoldersPct, maxBundlePct, minAgeBeforeYieldCheck
+Schedule: managementIntervalMin (min 5), screeningIntervalMin (min 15)
 Models: managementModel, screeningModel, generalModel
 Strategy: binsBelow
+
+GUARDED KEYS — values are clamped to safe ranges, you cannot exceed these bounds:
+- stopLossPct: between -40 and -5 (e.g. -15 is valid, -90 or -1 are not)
+- trailingTriggerPct: minimum 2
+- trailingDropPct: between 0.5 and 10
+- maxBotHoldersPct: maximum 50
+- maxBundlePct: maximum 50
+- managementIntervalMin: minimum 5
+- screeningIntervalMin: minimum 15
+
+LOCKED KEYS — these are user-only safety limits, do NOT attempt to change them:
+gasReserve, fixedDeployAmount, deployAmountSol, positionSizePct, minSolToOpen, maxPositions, maxDeployAmount
 
 Reason is optional but helpful — logged as a lesson when provided.`,
       parameters: {
