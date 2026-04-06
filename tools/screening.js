@@ -49,8 +49,12 @@ export async function discoverPools({ page_size = 50 } = {}) {
   const res = await fetch(url);
 
   if (!res.ok) {
+    let body = "";
+    try {
+      body = await res.text();
+    } catch {}
     throw new Error(
-      `Pool Discovery API error: ${res.status} ${res.statusText}`,
+      `Pool Discovery API error: ${res.status} ${res.statusText}${body ? ` — ${body.slice(0, 200)}` : ""}`,
     );
   }
 

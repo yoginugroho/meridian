@@ -9,6 +9,18 @@ const u = fs.existsSync(USER_CONFIG_PATH)
   ? JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"))
   : {};
 
+// Auto-correct stale "15m" timeframe — the Meteora Pool Discovery API accepts
+// 5m, 30m, 1h, 2h, 4h, 12h, 24h. "15m" was never valid and causes a 400 error.
+if (u.timeframe === "15m") {
+  u.timeframe = "30m";
+  try {
+    fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify({ ...u }, null, 2));
+    console.warn(
+      '[config] Auto-corrected timeframe "15m" → "30m" in user-config.json (15m is not a valid API timeframe)',
+    );
+  } catch {}
+}
+
 // Apply wallet/RPC from user-config if not already in env
 if (u.rpcUrl) process.env.RPC_URL ||= u.rpcUrl;
 if (u.walletKey) process.env.WALLET_PRIVATE_KEY ||= u.walletKey;

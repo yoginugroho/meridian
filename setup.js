@@ -94,11 +94,11 @@ function askChoice(question, choices) {
 }
 
 // Timeframe with hardcoded valid-value list to prevent silent API failures
-const VALID_TIMEFRAMES = ["5m", "15m", "1h", "2h", "4h", "12h", "24h"];
+const VALID_TIMEFRAMES = ["5m", "30m", "1h", "2h", "4h", "12h", "24h"];
 async function askTimeframe(defaultVal) {
   while (true) {
     const raw = await ask(
-      "Pool discovery timeframe (5m / 15m / 1h / 2h / 4h / 12h / 24h)",
+      "Pool discovery timeframe (5m / 30m / 1h / 2h / 4h / 12h / 24h)",
       defaultVal,
     );
     if (VALID_TIMEFRAMES.includes(raw)) return raw;
@@ -128,15 +128,15 @@ function buildEnv(map) {
 // ─── Presets ──────────────────────────────────────────────────────────────────
 //
 // Each preset now includes ALL configurable fields so presets are self-contained.
-// "30m" removed (not a valid API timeframe). Changed to "15m" for degen.
+// Valid API timeframes: 5m, 30m, 1h, 2h, 4h, 12h, 24h  (note: 15m is NOT valid).
 // trailingTriggerPct / trailingDropPct added — these are the primary exit mechanism.
 // takeProfitFeePct is the global hard-TP fallback (per-strategy values override it).
 //
 const PRESETS = {
   degen: {
     label: "Degen",
-    timeframe: "15m",
-    minFeeActiveTvlRatio: 0.1, // 15m timeframe: ≥0.05 = decent, ≥0.10 = strong
+    timeframe: "30m",
+    minFeeActiveTvlRatio: 0.1, // 30m timeframe: ≥0.05 = decent, ≥0.10 = strong
     minOrganic: 60,
     minHolders: 200,
     minMcap: 100_000,
@@ -152,7 +152,7 @@ const PRESETS = {
     managementIntervalMin: 5,
     screeningIntervalMin: 15,
     description:
-      "15m timeframe, pumping tokens, fast cycles. High risk/reward.",
+      "30m timeframe, pumping tokens, fast cycles. High risk/reward.",
   },
   moderate: {
     label: "Moderate",
@@ -201,7 +201,7 @@ const PRESETS = {
 // fee/TVL ratio context hints — displayed when asking for the threshold
 const FEE_TVL_HINTS = {
   "5m": "≥0.02 = decent,  ≥0.05 = strong",
-  "15m": "≥0.05 = decent,  ≥0.10 = strong",
+  "30m": "≥0.05 = decent,  ≥0.15 = strong",
   "1h": "≥0.20 = decent,  ≥0.50 = strong",
   "2h": "≥0.40 = decent,  ≥1.00 = strong",
   "4h": "≥0.80 = decent,  ≥2.00 = strong",
