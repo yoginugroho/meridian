@@ -396,9 +396,13 @@ export async function executeTool(name, args) {
           binStep: result.bin_step,
           baseFee: result.base_fee,
         }).catch(() => {});
-        // Set strategy metadata on newly deployed position
-        const activeStrategy = getActiveStrategy();
-        if (activeStrategy) {
+        // Set strategy metadata on newly deployed position.
+        // Prefer the globally active strategy; fall back to an explicit strategy_id
+        // arg so manual deploys (without set_active_strategy) still get exit params written.
+        const activeStrategy =
+          getActiveStrategy() ??
+          (args.strategy_id ? getStrategy({ id: args.strategy_id }) : null);
+        if (activeStrategy && !activeStrategy.error) {
           setPositionStrategyMeta(result.position, {
             strategy_id: activeStrategy.id,
             phase: args.phase ?? 1,

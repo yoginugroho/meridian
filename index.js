@@ -33,6 +33,7 @@ import {
 } from "./state.js";
 import {
   getActiveStrategy,
+  getStrategy,
   getStrategyPromptBlock,
   recordStrategyPerformance,
 } from "./strategy-library.js";
@@ -176,24 +177,6 @@ export async function runManagementCycle({ silent = false } = {}) {
       }
     }
 
-    // Phase 2 config for two-phase strategies (hardcoded, matches strategy-library.js)
-    const PHASE2_CONFIGS = {
-      retrace_bid_ask_flip: {
-        bins_above: 15,
-        bins_below: 0,
-        oor_timeout_minutes: 15,
-        trailing_trigger_pct: 10,
-        trailing_drop_pct: 3,
-      },
-      tight_wide_token_recovery: {
-        bins_above: 69,
-        bins_below: 0,
-        oor_timeout_minutes: 30,
-        trailing_trigger_pct: 15,
-        trailing_drop_pct: 5,
-      },
-    };
-
     // ── Deterministic rule checks (no LLM) ──────────────────────────
     // action: CLOSE | CLAIM | STAY | INSTRUCTION (needs LLM)
     const actionMap = new Map();
@@ -240,6 +223,10 @@ export async function runManagementCycle({ silent = false } = {}) {
       // ── Rule 7: Phase 1 complete — SOL-only two-phase strategy went OOR downward
       // active_bin < lower_bin for a SOL-only phase-1 position means all SOL bins have been
       // swept and converted to tokens. Trigger the phase flip.
+      // Phase 2 config is sourced directly from the strategy library — no hardcoded copy.
+      const _phase2Config = tracked?.strategy_id
+        ? getStrategy({ id: tracked.strategy_id })?.phase2
+        : null;
       if (
         p.active_bin != null &&
         p.lower_bin != null &&
@@ -247,7 +234,7 @@ export async function runManagementCycle({ silent = false } = {}) {
         !p.in_range &&
         tracked?.phase === 1 &&
         tracked?.single_side === "sol" &&
-        PHASE2_CONFIGS[tracked?.strategy_id]
+        _phase2Config
       ) {
         actionMap.set(p.position, {
           action: "PHASE_FLIP",
@@ -255,7 +242,7 @@ export async function runManagementCycle({ silent = false } = {}) {
           reason: `Phase 1 complete — all SOL converted to tokens (strategy: ${tracked.strategy_id})`,
           strategy_id: tracked.strategy_id,
           pool: p.pool,
-          phase2: PHASE2_CONFIGS[tracked.strategy_id],
+          phase2: _phase2Config,
         });
         continue;
       }

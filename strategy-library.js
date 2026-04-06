@@ -74,12 +74,12 @@ const DEFAULT_STRATEGIES = {
         "Wide ~45–80+ bins total. Cover -40% to -50% below entry price. bins_above=0 (SOL-only, no token side). Minimal or zero bins above — all range is below for DCA-in on further dips.",
     },
     exit: {
-      take_profit_pct: 10,
+      take_profit_pct: null,
       trailing_trigger_pct: 7,
       trailing_drop_pct: 2,
       oor_timeout_minutes: 30,
       notes:
-        "TP 3–10%+ when price rebounds and sweeps range + fees collected. Close early on no-recovery signal (volume dying, narrative breaking). OOR handling: reposition or cut if narrative breaks. No auto re-seed. Hold overnight/multi-hour — designed for sleep plays.",
+        "Trailing TP: activates at 7% PnL, closes on 2% drop from peak. Hard TP removed — trailing always fires first and gives better exits on volatile tokens. Close early on no-recovery signal (volume dying, narrative breaking). OOR handling: reposition or cut if narrative breaks. No auto re-seed. Hold overnight/multi-hour — designed for sleep plays.",
     },
     best_for:
       "Overnight/multi-hour holds while you sleep or work. Fee accumulation + directional recovery on dipped runners. Great for beginners building edge.",
@@ -128,6 +128,8 @@ const DEFAULT_STRATEGIES = {
       bins_below: 0,
       bins_above: 15,
       oor_timeout_minutes: 15,
+      trailing_trigger_pct: 10,
+      trailing_drop_pct: 3,
       notes:
         "Token-only flip: deploy tokens in bins ABOVE active bin (range for recovery). Same pool. Wait for price to pump back through range.",
     },
@@ -211,6 +213,8 @@ const DEFAULT_STRATEGIES = {
       bins_below: 0,
       bins_above: 69,
       oor_timeout_minutes: 30,
+      trailing_trigger_pct: 15,
+      trailing_drop_pct: 5,
       notes:
         "Wide token-only upside recovery: deploy all recovered tokens in bins_above=69 for 100-300% recovery range. Same pool.",
     },
@@ -245,12 +249,12 @@ const DEFAULT_STRATEGIES = {
         "Concentrated around VPVR high-volume bar. Max price = current price - some %, min price = last visible VPVR support bar. ~20 bins (not full wide). bins_above=0. If price never dumps into range, position earns nothing but loses nothing — maximum capital efficiency.",
     },
     exit: {
-      take_profit_pct: 8,
+      take_profit_pct: null,
       trailing_trigger_pct: 6,
       trailing_drop_pct: 2,
       oor_timeout_minutes: 180,
       notes:
-        "TP 5–10%+ when price dumps into range then rebounds back out. OOR handling: leave it — if it never touches your range you lose nothing (max efficiency). Re-seed only on a fresh new setup with updated VPVR analysis. Set and forget — designed for busy people.",
+        "Trailing TP: activates at 6% PnL, closes on 2% drop from peak. Hard TP removed — trailing always fires first and gives better exits on set-and-forget holds. OOR handling: leave it — if it never touches your range you lose nothing (max efficiency). Re-seed only on a fresh new setup with updated VPVR analysis.",
     },
     best_for:
       "Sleep/go-away plays, off-chart passive fee farming. Perfect for busy people or lower time commitment. Near-zero downside if range never hit.",

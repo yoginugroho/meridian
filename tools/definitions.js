@@ -218,6 +218,11 @@ WARNING: This executes a real on-chain transaction. Check DRY_RUN mode.`,
             description:
               "Position phase number (1 or 2). Used for two-phase strategies like retrace_bid_ask_flip and tight_wide_token_recovery. Default 1. Set to 2 when deploying Phase 2 of a flip strategy.",
           },
+          strategy_id: {
+            type: "string",
+            description:
+              "Optional. The strategy ID to apply exit metadata from (e.g. 'spot_wave_enjoyer'). Only needed when no active strategy is set via set_active_strategy. When provided, the strategy's take_profit_pct, trailing thresholds, oor_timeout_minutes, and yield overrides are written to the position automatically.",
+          },
         },
         required: ["pool_address"],
       },

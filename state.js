@@ -326,40 +326,56 @@ export function getStateSummary() {
 }
 
 /**
- * Check all exit conditions for a position (trailing TP, stop loss, OOR, low yield).
- * Updates peak_pnl_pct, trailing_active, and OOR state.
+ * Track peak PnL, manage trailing TP activation, and sync OOR state.
+ *
+ * This function is responsible for ONE exit signal only: trailing TP.
+ * Stop loss, OOR timeout, and low yield are handled exclusively by the
+ * numbered rules in runManagementCycle (index.js), which carry proper
+ * guards (pnlSuspect, in_range check, per-position overrides).
+ * Keeping those checks here as well caused three bugs:
+ *   1. pnlSuspect guard bypassed — API bad data (-99%) triggered real closes
+ *   2. Low yield fired on OOR positions (no in_range guard here)
+ *   3. Per-position min_fee_per_tvl_24h/min_age overrides silently ignored
+ *
  * @param {string} position_address
- * @param {object} positionData - fields from getMyPositions: pnl_pct, in_range, fee_per_tvl_24h
+ * @param {object} positionData - fields from getMyPositions: pnl_pct, in_range
  * @param {object} mgmtConfig
- * Returns { action, reason } or null if no exit needed.
+ * Returns { action, reason } or null if no trailing exit triggered.
  */
 export function updatePnlAndCheckExits(
   position_address,
   positionData,
   mgmtConfig,
 ) {
-  const { pnl_pct: currentPnlPct, in_range, fee_per_tvl_24h } = positionData;
+  const { pnl_pct: currentPnlPct, in_range } = positionData;
   const state = load();
   const pos = state.positions[position_address];
   if (!pos || pos.closed) return null;
 
-  // Use per-position trailing TP config if set, otherwise fall back to global config
+  // Per-position trailing config overrides global — strategy can tune these at deploy time
   const trailingTriggerPct =
     pos.trailing_trigger_pct ?? mgmtConfig.trailingTriggerPct;
   const trailingDropPct = pos.trailing_drop_pct ?? mgmtConfig.trailingDropPct;
 
   let changed = false;
 
-  // Track peak PnL
+  // ① Track peak PnL
   if (currentPnlPct != null && currentPnlPct > (pos.peak_pnl_pct ?? 0)) {
     pos.peak_pnl_pct = currentPnlPct;
     changed = true;
   }
 
-  // Activate trailing TP once trigger threshold is reached
+  // ② Activate trailing TP
+  // Enabled if the global flag is on, OR if this position's strategy explicitly
+  // configured a trigger threshold (pos.trailing_trigger_pct != null).
+  // This ensures strategies that set take_profit_pct=null (relying entirely on
+  // trailing) always have a working exit path even if trailingTakeProfit=false globally.
+  const trailingEnabled =
+    mgmtConfig.trailingTakeProfit || pos.trailing_trigger_pct != null;
   if (
-    mgmtConfig.trailingTakeProfit &&
+    trailingEnabled &&
     !pos.trailing_active &&
+    currentPnlPct != null &&
     currentPnlPct >= trailingTriggerPct
   ) {
     pos.trailing_active = true;
@@ -370,7 +386,7 @@ export function updatePnlAndCheckExits(
     );
   }
 
-  // Update OOR state
+  // ③ Update OOR state (single source of truth — Rule 4 in index.js reads this)
   if (in_range === false && !pos.out_of_range_since) {
     pos.out_of_range_since = new Date().toISOString();
     changed = true;
@@ -383,19 +399,7 @@ export function updatePnlAndCheckExits(
 
   if (changed) save(state);
 
-  // ── Stop loss ──────────────────────────────────────────────────
-  if (
-    currentPnlPct != null &&
-    mgmtConfig.stopLossPct != null &&
-    currentPnlPct <= mgmtConfig.stopLossPct
-  ) {
-    return {
-      action: "STOP_LOSS",
-      reason: `Stop loss: PnL ${currentPnlPct.toFixed(2)}% <= ${mgmtConfig.stopLossPct}%`,
-    };
-  }
-
-  // ── Trailing TP ────────────────────────────────────────────────
+  // ④ Fire trailing TP — the only exit this function owns
   if (pos.trailing_active) {
     const dropFromPeak = pos.peak_pnl_pct - currentPnlPct;
     if (dropFromPeak >= trailingDropPct) {
@@ -404,36 +408,6 @@ export function updatePnlAndCheckExits(
         reason: `Trailing TP: peak ${pos.peak_pnl_pct.toFixed(2)}% → current ${currentPnlPct.toFixed(2)}% (dropped ${dropFromPeak.toFixed(2)}% >= ${trailingDropPct}%)`,
       };
     }
-  }
-
-  // ── Out of range too long ──────────────────────────────────────
-  if (pos.out_of_range_since) {
-    const minutesOOR = Math.floor(
-      (Date.now() - new Date(pos.out_of_range_since).getTime()) / 60000,
-    );
-    const oorTimeoutUsed =
-      pos.oor_timeout_minutes ?? mgmtConfig.outOfRangeWaitMinutes;
-    if (minutesOOR >= oorTimeoutUsed) {
-      return {
-        action: "OUT_OF_RANGE",
-        reason: `Out of range for ${minutesOOR}m (limit: ${oorTimeoutUsed}m)`,
-      };
-    }
-  }
-
-  // ── Low yield (only after position has had time to accumulate fees) ───
-  const { age_minutes } = positionData;
-  const minAgeForYieldCheck = mgmtConfig.minAgeBeforeYieldCheck ?? 60;
-  if (
-    fee_per_tvl_24h != null &&
-    mgmtConfig.minFeePerTvl24h != null &&
-    fee_per_tvl_24h < mgmtConfig.minFeePerTvl24h &&
-    (age_minutes == null || age_minutes >= minAgeForYieldCheck)
-  ) {
-    return {
-      action: "LOW_YIELD",
-      reason: `Low yield: fee/TVL ${fee_per_tvl_24h.toFixed(2)}% < min ${mgmtConfig.minFeePerTvl24h}% (age: ${age_minutes ?? "?"}m)`,
-    };
   }
 
   return null;
